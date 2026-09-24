@@ -73,7 +73,7 @@ verificação em `src/kapso.rs`.
 | O quê | Valor |
 |---|---|
 | Assinatura | `X-Webhook-Signature`, HMAC-SHA256 do corpo cru, em hex |
-| Dedupe | `X-Idempotency-Key`, um UUID por evento, repetido nos retries |
+| Dedupe | `X-Idempotency-Key`, um UUID por entrega, repetido nos retries da mesma entrega |
 | Evento | `X-Webhook-Event`, ex.: `whatsapp.message.received` |
 | Lote | `X-Webhook-Batch: true` + `X-Batch-Size`; eventos em `data[]` (janela 1 a 60s, até 100) |
 | Retry | 3 tentativas contando a primeira (agora, +10s, +40s): desiste em ~50s |
