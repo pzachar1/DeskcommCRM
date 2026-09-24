@@ -16,7 +16,7 @@ cargo build --target wasm32-unknown-unknown   # o mesmo crate roda no Worker
 | Banco | Arquivo | Conteúdo |
 |---|---|---|
 | D1 global | `migrations/global/` | tenants, users, memberships, sessions, api_tokens, whatsapp_numbers |
-| SQLite do DO, um por tenant | `migrations/tenant/` | contacts, tags, pipelines, stages, leads, lead_activities, lead_links, conversations, messages, wa_templates, outbox |
+| SQLite do DO, um por tenant | `migrations/tenant/` | contacts, tags, pipelines, stages, leads, lead_activities, lead_links, conversations, messages, wa_templates, webhook_receipts, outbox |
 
 O D1 guarda o que precisa ser consultado acima de um tenant: login, permissão e
 de qual tenant é cada número de WhatsApp. O resto fica no DO do tenant
@@ -47,22 +47,47 @@ não consegue ler o banco de outro.
 ## Fluxo com o Kapso
 
 ```
-entrada: Kapso ─webhook─> Worker (valida assinatura, lê phone_number_id)
-         └─> D1 whatsapp_numbers: tenant ─> Queue ─> DO do tenant
-             INSERT messages ... ON CONFLICT (external_id) DO NOTHING
+entrada: Kapso ─webhook─> Worker
+           1. verify_signature(secret, corpo cru, X-Webhook-Signature)  -> 401 se falhar
+           2. phone_number_id (topo do payload v2) -> D1 whatsapp_numbers -> tenant
+           3. Queue.send(evento) e responde 200
+         Queue ─> DO do tenant
+           INSERT webhook_receipts (X-Idempotency-Key) ON CONFLICT DO NOTHING -> se já existia, para
+           INSERT messages ... ON CONFLICT (external_id) DO NOTHING
 
 saída:   DO grava messages(queued) + outbox  ─Alarm─> Queue ─> consumer chama Kapso
          └─> DO: status = accepted, external_id = wamid
-         status webhooks: sent / delivered / read / failed (o trigger ignora regressão)
+         eventos de status: sent / delivered / read / failed (o trigger ignora regressão)
 ```
 
 O tenant de um webhook sai **só** do `phone_number_id` resolvido no D1, nunca de um
 campo livre do payload.
 
+### Contrato do webhook (payload v2)
+
+Fonte: [Webhooks overview](https://docs.kapso.ai/docs/platform/webhooks/overview) e
+[Webhook security](https://docs.kapso.ai/docs/platform/webhooks/security). Constantes e
+verificação em `src/kapso.rs`.
+
+| O quê | Valor |
+|---|---|
+| Assinatura | `X-Webhook-Signature`, HMAC-SHA256 do corpo cru, em hex |
+| Dedupe | `X-Idempotency-Key`, um UUID por evento, repetido nos retries |
+| Evento | `X-Webhook-Event`, ex.: `whatsapp.message.received` |
+| Lote | `X-Webhook-Batch: true` + `X-Batch-Size`; eventos em `data[]` (janela 1 a 60s, até 100) |
+| Retry | 3 tentativas (10s, 40s, 90s), desiste em ~2,5 min |
+| Timeout | 30s, 45s em lote |
+
+**Consequência do retry curto:** se o Worker cair por mais de ~2,5 min, o evento se perde.
+Falta um caminho de reconciliação (Cron Trigger que busca na API do Kapso as mensagens
+recentes e reinsere, e a idempotência por `external_id` absorve o que já existia).
+
 ## Falta verificar antes da fase 2
 
-- Formato da assinatura e política de retry do webhook do Kapso. A documentação não
-  abriu no ambiente em que isto foi escrito.
+- Se o `X-Idempotency-Key` de uma entrega em lote vale para o lote inteiro ou se cada item
+  de `data[]` traz o seu. Isso muda onde o dedupe acontece.
+- Os valores de `message.kapso.origin` além de `cloud_api`, pra mapear em `sent_via`
+  (mensagem enviada pelo inbox do Kapso ou pelo app chega como `outbound`).
 - Se o SQLite do Durable Object liga `foreign_keys` por padrão. Se não ligar, o runner de
   migration tem que rodar `PRAGMA foreign_keys = ON`. Os testes rodam com FK ligada.
 - O runner de migration do DO: aplicar `TENANT_MIGRATIONS` com `version > PRAGMA user_version`

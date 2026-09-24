@@ -258,6 +258,22 @@ fn phone_must_be_e164() {
 }
 
 #[test]
+fn webhook_retry_is_deduped_by_idempotency_key() {
+    let db = tenant_db();
+    let receive = |key: &str| {
+        db.execute(
+            "INSERT INTO webhook_receipts (idempotency_key, event, received_at) VALUES (?1, 'whatsapp.message.delivered', ?2)
+             ON CONFLICT DO NOTHING",
+            params![key, T],
+        )
+        .unwrap()
+    };
+    assert_eq!(receive("k-1"), 1);
+    assert_eq!(receive("k-1"), 0, "retry do Kapso foi processado de novo");
+    assert_eq!(receive("k-2"), 1);
+}
+
+#[test]
 fn service_window_is_24h() {
     assert!(service_window_open(Some(T), T + SERVICE_WINDOW_MS - 1));
     assert!(!service_window_open(Some(T), T + SERVICE_WINDOW_MS));

@@ -274,6 +274,7 @@ pub struct Conversation {
     pub id: String,
     pub contact_id: String,
     pub phone_number_id: String,
+    pub kapso_conversation_id: Option<String>,
     pub status: ConversationStatus,
     pub status_changed_at: i64,
     pub assigned_to_user_id: Option<String>,

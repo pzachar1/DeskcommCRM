@@ -8,6 +8,7 @@
 //!
 //! O crate não depende de `worker`: compila para wasm32 e para o host (testes).
 
+pub mod kapso;
 pub mod model;
 
 /// Migration numerada. O número vira `PRAGMA user_version` no DO.

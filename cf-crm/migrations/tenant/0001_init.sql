@@ -201,6 +201,8 @@ CREATE TABLE conversations (
   id                  TEXT PRIMARY KEY,
   contact_id          TEXT NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT,
   phone_number_id     TEXT NOT NULL,
+  -- conversation.id do payload v2 do Kapso. Só ponteiro: o estado da conversa é nosso.
+  kapso_conversation_id TEXT UNIQUE,
   status              TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'ai_handling', 'human', 'closed')),
   status_changed_at   INTEGER NOT NULL,
   assigned_to_user_id TEXT,
@@ -307,6 +309,17 @@ CREATE TABLE wa_templates (
   synced_at    INTEGER NOT NULL,
   UNIQUE (waba_id, name, language)
 );
+
+-- Dedupe por evento. O Kapso manda X-Idempotency-Key em toda entrega e repete
+-- a mesma chave nos retries (3 tentativas: 10s, 40s, 90s). Cobre o que o
+-- unique de messages.external_id não cobre: evento de status, que não cria linha.
+-- O Alarm do DO apaga o que tiver mais de 7 dias.
+CREATE TABLE webhook_receipts (
+  idempotency_key TEXT PRIMARY KEY,
+  event           TEXT NOT NULL,     -- X-Webhook-Event, ex.: whatsapp.message.received
+  received_at     INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX idx_webhook_receipts_received ON webhook_receipts (received_at);
 
 -- ---------------------------------------------------------------- outbox
 -- Efeito externo (envio no Kapso) nunca sai de dentro da transação.
