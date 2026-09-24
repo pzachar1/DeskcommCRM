@@ -66,7 +66,8 @@ campo livre do payload.
 ### Contrato do webhook (payload v2)
 
 Fonte: [Webhooks overview](https://docs.kapso.ai/docs/platform/webhooks/overview) e
-[Webhook security](https://docs.kapso.ai/docs/platform/webhooks/security). Constantes e
+[Webhook security](https://docs.kapso.ai/docs/platform/webhooks/security) e
+[Delivery](https://docs.kapso.ai/docs/platform/webhooks/advanced). Constantes e
 verificação em `src/kapso.rs`.
 
 | O quê | Valor |
@@ -75,19 +76,36 @@ verificação em `src/kapso.rs`.
 | Dedupe | `X-Idempotency-Key`, um UUID por evento, repetido nos retries |
 | Evento | `X-Webhook-Event`, ex.: `whatsapp.message.received` |
 | Lote | `X-Webhook-Batch: true` + `X-Batch-Size`; eventos em `data[]` (janela 1 a 60s, até 100) |
-| Retry | 3 tentativas (10s, 40s, 90s), desiste em ~2,5 min |
-| Timeout | 30s, 45s em lote |
+| Retry | 3 tentativas contando a primeira (agora, +10s, +40s): desiste em ~50s |
+| Resposta | 200 em até 10s |
+| Pausa automática | em 15 min, ≥40 entregas, ≥10 falhas e ≥85% de falha: webhook desativado até religar no painel |
+| Ordem | por conversa, com número de sequência; depois de 30s entrega fora de ordem |
+| Origem | `message.kapso.origin`: `cloud_api`, `business_app`, `history_sync` |
 
-**Consequência do retry curto:** se o Worker cair por mais de ~2,5 min, o evento se perde.
+**Consequência do retry curto:** se o Worker cair por mais de ~50s, o evento se perde.
+E se cair por mais tempo com tráfego, o Kapso pausa o webhook e para de entregar tudo.
 Falta um caminho de reconciliação (Cron Trigger que busca na API do Kapso as mensagens
 recentes e reinsere, e a idempotência por `external_id` absorve o que já existia).
 
+### O que isso decide
+
+- **O dedupe de verdade é o `external_id` (wamid), não o `X-Idempotency-Key`.** A chave é
+  do header, então vale por entrega. Quando um lote falha nas 3 tentativas, o Kapso
+  reenvia as mensagens uma a uma, cada uma com chave nova. A mesma mensagem chega de
+  novo com outra chave, e quem segura é o `uq_messages_external`. `webhook_receipts`
+  continua servindo pra evento de status, que não cria linha.
+- **Com buffering ligado, toda entrega vem em formato de lote**, mesmo com uma mensagem só.
+  O parser decide pelo campo `batch`, nunca pela forma do JSON.
+- **Ordem de chegada não é ordem de conversa.** A tela ordena por `sent_at` (timestamp da
+  Meta), então mensagem atrasada cai no lugar certo.
+- **Origem → `sent_via`:** `business_app` vira `external_device` (sua equipe mandou pelo
+  app); `cloud_api` com direção `outbound` é eco de envio nosso, e o wamid já existe;
+  `history_sync` só entra em importação, nunca dispara agente nem automação.
+- **A assinatura é do corpo cru.** O exemplo "production setup" da doc verifica depois de
+  re-serializar `data`, e isso quebra a assinatura. Aqui o Worker verifica antes do parse.
+
 ## Falta verificar antes da fase 2
 
-- Se o `X-Idempotency-Key` de uma entrega em lote vale para o lote inteiro ou se cada item
-  de `data[]` traz o seu. Isso muda onde o dedupe acontece.
-- Os valores de `message.kapso.origin` além de `cloud_api`, pra mapear em `sent_via`
-  (mensagem enviada pelo inbox do Kapso ou pelo app chega como `outbound`).
 - Se o SQLite do Durable Object liga `foreign_keys` por padrão. Se não ligar, o runner de
   migration tem que rodar `PRAGMA foreign_keys = ON`. Os testes rodam com FK ligada.
 - O runner de migration do DO: aplicar `TENANT_MIGRATIONS` com `version > PRAGMA user_version`
