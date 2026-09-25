@@ -163,16 +163,21 @@ pub struct Contact {
     pub email: Option<String>,
     pub phone_e164: Option<String>,
     pub wa_id: Option<String>,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_blocked: bool,
     pub blocked_reason: Option<String>,
     pub blocked_at: Option<i64>,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_anonymized: bool,
     pub anonymized_at: Option<i64>,
     pub merged_into_id: Option<String>,
     pub merged_at: Option<i64>,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub force_human: bool,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub consent: Value,
     pub source: String,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub source_metadata: Value,
     pub last_activity_at: Option<i64>,
     pub created_by: Option<String>,
@@ -186,10 +191,14 @@ pub struct Pipeline {
     pub name: String,
     pub slug: String,
     pub description: Option<String>,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_default: bool,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_archived: bool,
     pub position: String,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub vocabulary: Value,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub settings: Value,
     pub created_at: i64,
     pub updated_at: i64,
@@ -204,9 +213,13 @@ pub struct Stage {
     pub description: Option<String>,
     pub position: String,
     pub color: Option<String>,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_won: bool,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_lost: bool,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub is_archived: bool,
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
     pub requires_human: bool,
     pub expected_duration_hours: Option<i64>,
     pub created_at: i64,
@@ -233,8 +246,10 @@ pub struct Lead {
     pub closed_at: Option<i64>,
     pub last_activity_at: Option<i64>,
     pub source: String,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub source_metadata: Value,
     pub external_id: Option<String>,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub custom_fields: Value,
     pub created_by: Option<String>,
     pub created_at: i64,
@@ -251,6 +266,7 @@ pub struct LeadActivity {
     pub kind: String,
     pub source_module: String,
     pub source_id: Option<String>,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub payload: Value,
     pub performed_by: Option<String>,
     pub performed_at: i64,
@@ -264,6 +280,7 @@ pub struct LeadLink {
     pub target_kind: LinkTargetKind,
     pub target_id: String,
     pub link_kind: String,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub metadata: Value,
     pub created_by: Option<String>,
     pub created_at: i64,
@@ -312,6 +329,7 @@ pub struct Message {
     pub body: Option<String>,
     pub template_name: Option<String>,
     pub template_language: Option<String>,
+    #[serde(default, deserialize_with = "crate::dbfmt::opt_json_text")]
     pub template_params: Option<Value>,
     pub media_r2_key: Option<String>,
     pub media_meta_id: Option<String>,
@@ -327,6 +345,7 @@ pub struct Message {
     pub delivered_at: Option<i64>,
     pub read_at: Option<i64>,
     pub failed_at: Option<i64>,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub metadata: Value,
     pub created_at: i64,
     pub updated_at: i64,
@@ -337,6 +356,7 @@ pub struct OutboxItem {
     pub id: String,
     pub kind: OutboxKind,
     pub ref_id: String,
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
     pub payload: Value,
     pub attempts: i64,
     pub next_attempt_at: i64,

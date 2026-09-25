@@ -8,10 +8,12 @@
 //!
 //! O crate não depende de `worker`: compila para wasm32 e para o host (testes).
 
+pub mod dbfmt;
 pub mod kapso;
 pub mod model;
 
-/// Migration numerada. O número vira `PRAGMA user_version` no DO.
+/// Migration numerada. O runner (`crm_core::migrate`) registra cada versão aplicada
+/// na tabela `_migrations` do próprio banco.
 pub struct Migration {
     pub version: u32,
     pub name: &'static str,
@@ -27,7 +29,7 @@ pub const GLOBAL_MIGRATIONS: &[Migration] = &[Migration {
 }];
 
 /// Migrations do SQLite de cada tenant. O DO aplica no construtor, em ordem,
-/// as que tiverem `version > PRAGMA user_version`.
+/// as que ainda não estão em `_migrations`.
 pub const TENANT_MIGRATIONS: &[Migration] = &[Migration {
     version: 1,
     name: "init",

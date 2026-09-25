@@ -14,3 +14,9 @@ sha2 = "0.10"
 
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+[workspace]
+members = ["core", "worker"]
+# `cargo test` na raiz roda só o que executa no host; o worker é wasm.
+default-members = [".", "core"]
+resolver = "2"

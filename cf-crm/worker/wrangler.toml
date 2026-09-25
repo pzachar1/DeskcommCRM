@@ -1,0 +1,25 @@
+name = "crm"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-06-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+# Banco global: tenants, usuários, sessões, roteamento de número do WhatsApp.
+[[d1_databases]]
+binding = "DB"
+database_name = "crm"
+database_id = "PREENCHER_COM_O_ID_DO_wrangler_d1_create"
+migrations_dir = "../migrations/global"
+
+# Um Durable Object (com SQLite próprio) por tenant.
+[durable_objects]
+bindings = [{ name = "TENANT", class_name = "TenantDo" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TenantDo"]
+
+[vars]
+# "true" só enquanto cria a primeira conta. Depois volte pra "false".
+ALLOW_SIGNUP = "false"

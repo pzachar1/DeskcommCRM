@@ -1,14 +1,28 @@
-# crm-schema
+# crm-schema / crm-core / crm-worker
 
-Fase 1 do CRM em Rust + Cloudflare: o modelo de dados. Tira o domínio do
-DeskcommCRM (`supabase/baseline.sql`) e reescreve pra dois bancos SQLite,
-com WhatsApp pela API oficial via Kapso.
-
+CRM em Rust + Cloudflare, construído a partir do domínio do DeskcommCRM
+(`supabase/baseline.sql`), com WhatsApp pela API oficial via Kapso.
 Esta pasta é independente do resto do repositório e foi feita pra virar um repo próprio.
 
+| Crate | Pasta | O que tem |
+|---|---|---|
+| `crm-schema` | `.` | migrations (D1 e DO), structs do modelo, contrato do webhook do Kapso |
+| `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline. Sem runtime: o banco entra por um trait |
+| `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel) + Durable Object por tenant |
+
 ```bash
-cargo test                                    # aplica as migrations num SQLite e prova as regras
-cargo build --target wasm32-unknown-unknown   # o mesmo crate roda no Worker
+cargo test                                                 # schema + core, SQLite de verdade no host
+cargo check -p crm-worker --target wasm32-unknown-unknown  # o worker só compila pra wasm
+```
+
+### Rodar o worker local (D1 + Durable Object no workerd)
+
+```bash
+cd worker
+npx wrangler d1 migrations apply crm --local
+echo 'ALLOW_SIGNUP="true"' > .dev.vars
+npx wrangler dev --port 8787
+python3 e2e/smoke.py http://127.0.0.1:8787   # 34 verificações pela API
 ```
 
 ## Onde mora cada coisa
@@ -104,9 +118,55 @@ recentes e reinsere, e a idempotência por `external_id` absorve o que já exist
 - **A assinatura é do corpo cru.** O exemplo "production setup" da doc verifica depois de
   re-serializar `data`, e isso quebra a assinatura. Aqui o Worker verifica antes do parse.
 
-## Falta verificar antes da fase 2
+## API (fase 2)
 
-- Se o SQLite do Durable Object liga `foreign_keys` por padrão. Se não ligar, o runner de
-  migration tem que rodar `PRAGMA foreign_keys = ON`. Os testes rodam com FK ligada.
-- O runner de migration do DO: aplicar `TENANT_MIGRATIONS` com `version > PRAGMA user_version`
-  dentro de `blockConcurrencyWhile` no construtor.
+Toda resposta: `{ data }` ou `{ error: { code, message } }`, com `X-Request-Id`.
+Sessão por cookie `crm_session` (HttpOnly, Secure, SameSite=Strict). Quem pertence a
+mais de um tenant manda `X-Tenant-Id`. Escrita exige `Content-Type: application/json`,
+o que barra POST de formulário vindo de outro site.
+
+| Rota | Papel mínimo |
+|---|---|
+| `POST /api/v1/auth/signup` · `login` · `logout`, `GET /api/v1/me` | público / sessão |
+| `GET /api/v1/contacts?q=&limit=&cursor=`, `GET /api/v1/contacts/{id}` | viewer |
+| `POST /api/v1/contacts`, `PATCH /api/v1/contacts/{id}` | agent |
+| `GET /api/v1/pipelines`, `/{id}`, `/{id}/board` | viewer |
+| `POST /api/v1/pipelines`, `POST /api/v1/pipelines/{id}/stages` | manager |
+| `POST /api/v1/leads`, `PATCH /api/v1/leads/{id}` | agent |
+| `POST /api/v1/leads/{id}/move` `{ stage_id, prev_lead_id?, next_lead_id?, lost_reason? }` | agent |
+| `POST /api/v1/leads/{id}/notes`, `GET /api/v1/leads/{id}/activities` | agent / viewer |
+
+Conta nova já nasce com o funil "Vendas" (novo → qualificado → proposta → ganho / perdido).
+
+## Como a fase 2 funciona por dentro
+
+- **Migrations do tenant rodam no construtor do DO.** O SQL do DO é síncrono, então
+  terminam antes de qualquer requisição chegar. Cada versão aplicada fica em `_migrations`.
+  Se uma falhar, o DO responde 500 em vez de operar com banco pela metade.
+- **Chave estrangeira já vem ligada** no D1 e no SQLite do DO (workerd), então o runner
+  não precisa de `PRAGMA`. Os testes no host ligam explicitamente pra ficar igual.
+- **Atomicidade:** o `sql.exec` do DO não aceita `BEGIN`/`SAVEPOINT`, e o `workers-rs`
+  0.8.6 não expõe `transactionSync`. O `DoDb::atomic` chama `ctx.storage.transactionSync`
+  pelo objeto JS e transforma erro do core em exceção, pro runtime desfazer.
+  O `smoke.py` prova isso: um funil que falha na 2ª etapa não deixa resto. Com o
+  `transactionSync` desligado de propósito, esse teste quebra.
+- **Kanban:** chave de fractional indexing completa (parte inteira + fração, algoritmo do
+  Greenspan). Lead novo vai pro fim da coluna, e 10 mil inserções no fim dão chave de 4
+  caracteres. Mover um card grava uma linha só.
+- **Timeline:** toda mutação de lead grava em `lead_activities` na mesma transação e
+  atualiza `last_activity_at`. Reordenar dentro da mesma coluna não gera atividade.
+- **Senha:** argon2id com os parâmetros padrão do crate (19 MiB, 2 passadas). No `wrangler dev`
+  o login levou uns 50 ms, acima do limite de CPU do plano Free dos Workers (10 ms):
+  em produção, precisa do plano Paid. E-mail que não existe custa o mesmo hash, pra não
+  revelar quem tem conta.
+- **O Worker monta a requisição interna do zero.** Nenhum header do cliente chega ao DO,
+  então não dá pra forjar `X-Actor-User-Id` (o `smoke.py` testa).
+
+## Ainda não tem
+
+- Limite de tentativas no login (Rate Limiting binding do Workers)
+- Token de API: a tabela `api_tokens` existe, falta a rota que cria e a leitura do `Bearer`
+- Convite de usuário e troca de papel
+- Log de auditoria das mutações
+- Cursor de paginação assinado (hoje é `created_at.id` em texto)
+- Webhook do Kapso e envio (fase 3) e a interface em Dioxus
