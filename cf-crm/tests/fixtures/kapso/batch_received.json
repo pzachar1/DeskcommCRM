@@ -1,0 +1,73 @@
+{
+  "type": "whatsapp.message.received",
+  "batch": true,
+  "data": [
+    {
+      "message": {
+        "id": "wamid.111",
+        "timestamp": "1730092801",
+        "type": "text",
+        "text": {
+          "body": "First in batch"
+        },
+        "kapso": {
+          "direction": "inbound",
+          "status": "received",
+          "processing_status": "pending",
+          "origin": "cloud_api",
+          "phone_number": "+15551234567",
+          "phone_number_id": "123456789012345"
+        }
+      },
+      "conversation": {
+        "id": "conv_123",
+        "phone_number": "+15551234567",
+        "status": "active",
+        "last_active_at": "2025-10-28T14:26:01Z",
+        "created_at": "2025-10-28T13:40:00Z",
+        "updated_at": "2025-10-28T14:26:01Z",
+        "metadata": {},
+        "phone_number_id": "123456789012345"
+      },
+      "is_new_conversation": false,
+      "phone_number_id": "123456789012345"
+    },
+    {
+      "message": {
+        "id": "wamid.112",
+        "timestamp": "1730092802",
+        "type": "text",
+        "text": {
+          "body": "Second in batch"
+        },
+        "kapso": {
+          "direction": "inbound",
+          "status": "received",
+          "processing_status": "pending",
+          "origin": "cloud_api",
+          "phone_number": "+15551234567",
+          "phone_number_id": "123456789012345"
+        }
+      },
+      "conversation": {
+        "id": "conv_123",
+        "phone_number": "+15551234567",
+        "status": "active",
+        "last_active_at": "2025-10-28T14:26:02Z",
+        "created_at": "2025-10-28T13:40:00Z",
+        "updated_at": "2025-10-28T14:26:02Z",
+        "metadata": {},
+        "phone_number_id": "123456789012345"
+      },
+      "is_new_conversation": false,
+      "phone_number_id": "123456789012345"
+    }
+  ],
+  "batch_info": {
+    "size": 2,
+    "window_ms": 5000,
+    "first_sequence": 101,
+    "last_sequence": 102,
+    "conversation_id": "conv_123"
+  }
+}
