@@ -362,4 +362,7 @@ pub struct OutboxItem {
     pub next_attempt_at: i64,
     pub last_error: Option<String>,
     pub created_at: i64,
+    /// Envio em andamento desde este instante (migration 0002).
+    #[serde(default)]
+    pub in_flight_at: Option<i64>,
 }

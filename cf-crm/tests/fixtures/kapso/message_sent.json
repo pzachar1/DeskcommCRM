@@ -1,0 +1,47 @@
+{
+  "message": {
+    "id": "wamid.456",
+    "timestamp": "1730092860",
+    "type": "text",
+    "text": {
+      "body": "On my way"
+    },
+    "kapso": {
+      "direction": "outbound",
+      "status": "sent",
+      "processing_status": "completed",
+      "origin": "cloud_api",
+      "has_media": false,
+      "statuses": [
+        {
+          "id": "wamid.456",
+          "status": "sent",
+          "timestamp": "1730092860",
+          "recipient_id": "15551234567"
+        }
+      ]
+    }
+  },
+  "conversation": {
+    "id": "conv_123",
+    "phone_number": "+15551234567",
+    "status": "active",
+    "last_active_at": "2025-10-28T14:31:00Z",
+    "created_at": "2025-10-28T13:40:00Z",
+    "updated_at": "2025-10-28T14:31:00Z",
+    "metadata": {},
+    "phone_number_id": "123456789012345",
+    "kapso": {
+      "contact_name": "John Doe",
+      "messages_count": 2,
+      "last_message_id": "wamid.456",
+      "last_message_type": "text",
+      "last_message_timestamp": "2025-10-28T14:31:00Z",
+      "last_message_text": "On my way",
+      "last_inbound_at": "2025-10-28T14:25:01Z",
+      "last_outbound_at": "2025-10-28T14:31:00Z"
+    }
+  },
+  "is_new_conversation": false,
+  "phone_number_id": "123456789012345"
+}

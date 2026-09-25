@@ -30,11 +30,18 @@ pub const GLOBAL_MIGRATIONS: &[Migration] = &[Migration {
 
 /// Migrations do SQLite de cada tenant. O DO aplica no construtor, em ordem,
 /// as que ainda não estão em `_migrations`.
-pub const TENANT_MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "init",
-    sql: include_str!("../migrations/tenant/0001_init.sql"),
-}];
+pub const TENANT_MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "init",
+        sql: include_str!("../migrations/tenant/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "outbox_in_flight",
+        sql: include_str!("../migrations/tenant/0002_outbox_in_flight.sql"),
+    },
+];
 
 /// Janela de atendimento da Meta: 24h desde a última mensagem do contato.
 /// Fora dela, só template aprovado.

@@ -8,6 +8,9 @@ pub enum CoreError {
     Validation { code: &'static str, message: String },
     #[error("{message}")]
     Conflict { code: &'static str, message: String },
+    /// Ainda não dá pra processar; tentar de novo mais tarde (503).
+    #[error("{message}")]
+    Retry { code: &'static str, message: String },
     #[error("erro de banco: {0}")]
     Db(String),
 }
@@ -23,11 +26,16 @@ impl CoreError {
         CoreError::Conflict { code, message: message.into() }
     }
 
+    pub fn retry(code: &'static str, message: impl Into<String>) -> Self {
+        CoreError::Retry { code, message: message.into() }
+    }
+
     pub fn status(&self) -> u16 {
         match self {
             CoreError::NotFound(_) => 404,
             CoreError::Validation { .. } => 422,
             CoreError::Conflict { .. } => 409,
+            CoreError::Retry { .. } => 503,
             CoreError::Db(_) => 500,
         }
     }
@@ -35,7 +43,7 @@ impl CoreError {
     pub fn code(&self) -> &'static str {
         match self {
             CoreError::NotFound(_) => "not_found",
-            CoreError::Validation { code, .. } | CoreError::Conflict { code, .. } => code,
+            CoreError::Validation { code, .. } | CoreError::Conflict { code, .. } | CoreError::Retry { code, .. } => code,
             CoreError::Db(_) => "internal_error",
         }
     }

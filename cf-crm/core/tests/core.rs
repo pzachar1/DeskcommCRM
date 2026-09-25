@@ -34,8 +34,9 @@ fn column(env: &Env, pipeline_id: &str, slug: &str) -> Vec<String> {
 #[test]
 fn migrate_is_idempotent_and_records_version() {
     let db = SqliteDb::new();
-    assert_eq!(migrate(&db, TENANT_MIGRATIONS, NOW).unwrap(), 1);
-    assert_eq!(migrate(&db, TENANT_MIGRATIONS, NOW + 1).unwrap(), 1, "rodar de novo não reaplica");
+    let last = TENANT_MIGRATIONS.last().unwrap().version;
+    assert_eq!(migrate(&db, TENANT_MIGRATIONS, NOW).unwrap(), last);
+    assert_eq!(migrate(&db, TENANT_MIGRATIONS, NOW + 1).unwrap(), last, "rodar de novo não reaplica");
 }
 
 #[test]

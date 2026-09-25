@@ -35,11 +35,11 @@ impl Membership {
     }
 }
 
-fn s(v: &str) -> JsValue {
+pub(crate) fn s(v: &str) -> JsValue {
     JsValue::from_str(v)
 }
 
-fn n(v: i64) -> JsValue {
+pub(crate) fn n(v: i64) -> JsValue {
     JsValue::from_f64(v as f64)
 }
 

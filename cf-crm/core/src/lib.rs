@@ -7,8 +7,11 @@ pub mod contacts;
 pub mod db;
 pub mod error;
 pub mod fractional;
+pub mod inbox;
 pub mod leads;
+pub mod messaging;
 pub mod migrate;
+pub mod outbox;
 pub mod pipelines;
 
 pub use error::{CoreError, Result};

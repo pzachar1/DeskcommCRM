@@ -7,8 +7,8 @@ Esta pasta é independente do resto do repositório e foi feita pra virar um rep
 | Crate | Pasta | O que tem |
 |---|---|---|
 | `crm-schema` | `.` | migrations (D1 e DO), structs do modelo, contrato do webhook do Kapso |
-| `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline. Sem runtime: o banco entra por um trait |
-| `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel) + Durable Object por tenant |
+| `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline, conversas, entrada e envio de WhatsApp. Sem runtime: o banco entra por um trait |
+| `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel, webhook do Kapso, consumer da Queue) + Durable Object por tenant |
 
 ```bash
 cargo test                                                 # schema + core, SQLite de verdade no host
@@ -20,10 +20,34 @@ cargo check -p crm-worker --target wasm32-unknown-unknown  # o worker só compil
 ```bash
 cd worker
 npx wrangler d1 migrations apply crm --local
-echo 'ALLOW_SIGNUP="true"' > .dev.vars
+cat > .dev.vars <<'VARS'
+ALLOW_SIGNUP="true"
+KAPSO_API_BASE="http://127.0.0.1:8799"
+KAPSO_API_KEY="chave-de-teste"
+KAPSO_WEBHOOK_SECRET="segredo-de-teste"
+VARS
 npx wrangler dev --port 8787
-python3 e2e/smoke.py http://127.0.0.1:8787   # 34 verificações pela API
+python3 e2e/smoke.py http://127.0.0.1:8787      # fase 2: 34 verificações pela API
+python3 e2e/whatsapp.py http://127.0.0.1:8787   # fase 3: 36 verificações, com um Kapso falso na porta 8799
 ```
+
+### Subir em produção
+
+```bash
+cd worker
+npx wrangler d1 create crm                  # e cole o id no wrangler.toml
+npx wrangler d1 migrations apply crm --remote
+npx wrangler queues create crm-inbound
+npx wrangler queues create crm-inbound-dlq
+npx wrangler secret put KAPSO_API_KEY
+npx wrangler secret put KAPSO_WEBHOOK_SECRET
+npx wrangler deploy
+```
+
+No Kapso, crie o webhook do número apontando pra `https://<seu-worker>/webhooks/kapso`, com
+payload `v2` e os eventos `whatsapp.message.received`, `.sent`, `.delivered`, `.read` e
+`.failed`. Depois cadastre o número no CRM (`POST /api/v1/whatsapp-numbers`): evento de número
+não cadastrado é descartado com aviso no log.
 
 ## Onde mora cada coisa
 
@@ -69,8 +93,9 @@ entrada: Kapso ─webhook─> Worker
            INSERT webhook_receipts (X-Idempotency-Key) ON CONFLICT DO NOTHING -> se já existia, para
            INSERT messages ... ON CONFLICT (external_id) DO NOTHING
 
-saída:   DO grava messages(queued) + outbox  ─Alarm─> Queue ─> consumer chama Kapso
-         └─> DO: status = accepted, external_id = wamid
+saída:   DO grava messages(queued) + outbox, na mesma transação, e agenda o Alarm
+         Alarm: marca in_flight -> POST {KAPSO_API_BASE}/{phone_number_id}/messages
+         └─> DO: status = accepted, external_id = wamid (ou nova tentativa, ou failed)
          eventos de status: sent / delivered / read / failed (o trigger ignora regressão)
 ```
 
@@ -115,6 +140,11 @@ recentes e reinsere, e a idempotência por `external_id` absorve o que já exist
 - **Origem → `sent_via`:** `business_app` vira `external_device` (sua equipe mandou pelo
   app); `cloud_api` com direção `outbound` é eco de envio nosso, e o wamid já existe;
   `history_sync` só entra em importação, nunca dispara agente nem automação.
+- **Toda saída leva `biz_opaque_callback_data` com o id da nossa mensagem.** A Meta devolve esse
+  valor nos status, então um `sent` que chega antes de a resposta do envio ser gravada ainda
+  acha a mensagem certa. Sem ele, evento de saída com wamid desconhecido volta pra fila por até
+  2 min e só então é adotado como enviado por fora do CRM (`sent_via = api`); se a resposta do
+  envio aparecer depois, a cópia é fundida na mensagem original.
 - **A assinatura é do corpo cru.** O exemplo "production setup" da doc verifica depois de
   re-serializar `data`, e isso quebra a assinatura. Aqui o Worker verifica antes do parse.
 
@@ -135,8 +165,16 @@ o que barra POST de formulário vindo de outro site.
 | `POST /api/v1/leads`, `PATCH /api/v1/leads/{id}` | agent |
 | `POST /api/v1/leads/{id}/move` `{ stage_id, prev_lead_id?, next_lead_id?, lost_reason? }` | agent |
 | `POST /api/v1/leads/{id}/notes`, `GET /api/v1/leads/{id}/activities` | agent / viewer |
+| `GET /api/v1/whatsapp-numbers`, `POST /api/v1/whatsapp-numbers` `{ phone_number_id, display_phone, waba_id?, label? }` | viewer / admin |
+| `GET /api/v1/conversations?status=&limit=&cursor=`, `GET /api/v1/conversations/{id}` | viewer |
+| `POST /api/v1/conversations` `{ contact_id, phone_number_id }` (falar primeiro) | agent |
+| `GET /api/v1/conversations/{id}/messages?limit=&cursor=` | viewer |
+| `POST /api/v1/conversations/{id}/messages` `{ type: "text", body }` ou `{ type: "template", name, language, components? }` | agent |
+| `POST /api/v1/conversations/{id}/read` | agent |
+| `POST /webhooks/kapso` | assinatura HMAC |
 
 Conta nova já nasce com o funil "Vendas" (novo → qualificado → proposta → ganho / perdido).
+Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200, e nada sai de novo.
 
 ## Como a fase 2 funciona por dentro
 
@@ -162,6 +200,34 @@ Conta nova já nasce com o funil "Vendas" (novo → qualificado → proposta →
 - **O Worker monta a requisição interna do zero.** Nenhum header do cliente chega ao DO,
   então não dá pra forjar `X-Actor-User-Id` (o `smoke.py` testa).
 
+## Como a fase 3 funciona por dentro
+
+- **O webhook só verifica, enfileira e responde.** Assinatura do corpo cru, tenant pelo
+  `phone_number_id` no D1, um item na Queue por evento (lote vira N itens), 200. Se a Queue
+  falhar, responde 500 e o Kapso reentrega.
+- **Número não cadastrado não devolve erro.** Erro faria o Kapso repetir e, somando falhas,
+  pausar o webhook de todos os números. O evento é descartado com aviso no log.
+- **O consumer entrega cada evento ao DO** por uma rota interna que só aceita chamada marcada
+  pelo próprio Worker. 503 do DO (saída ainda sem wamid) volta pra fila em 30s; 4xx (payload
+  fora do formato) é descartado com log; o resto tenta de novo até cair na `crm-inbound-dlq`.
+- **Cada evento é uma transação:** recibo (`X-Idempotency-Key` + posição no lote), contato,
+  conversa, mensagem e contadores. O contato é achado pelo `wa_id`; se não houver, pelo telefone
+  cadastrado à mão, e aí o `wa_id` é gravado nele.
+- **Uma conversa por contato e número.** A sessão de 24h do Kapso vai e vem; o
+  `kapso_conversation_id` guarda só a mais recente.
+- **Envio sai no máximo uma vez.** O Alarm marca `in_flight_at` antes de chamar o Kapso. Erro
+  temporário (rede, 429, 5xx, limite da Meta) tenta de novo em 30s, 1, 2, 4 e 8 min e desiste
+  na 6ª tentativa. Erro permanente vira `failed` na hora, com o código da Meta. Se a resposta
+  nunca volta (o DO caiu no meio), depois de 5 min a mensagem vira `failed` com
+  `send_outcome_unknown` em vez de sair de novo. Timeout da chamada: 30s.
+- **Texto só dentro da janela de 24h** (`service_window_closed` fora dela). Template passa
+  sempre; quem recusa template não aprovado é a Meta, e o erro volta na mensagem.
+- **Mídia recebida** guarda o id na Meta, o tipo, o tamanho e a URL do Kapso em `metadata`.
+  Histórico importado (`history_sync`) não conta como não lida.
+- Provado no host (32 testes do fluxo, com os payloads da documentação do Kapso em
+  `tests/fixtures/kapso/`) e no `wrangler dev` com D1, DO, Queue e Alarm locais contra um
+  servidor HTTP que faz o papel do Kapso (`e2e/whatsapp.py`).
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)
@@ -169,4 +235,10 @@ Conta nova já nasce com o funil "Vendas" (novo → qualificado → proposta →
 - Convite de usuário e troca de papel
 - Log de auditoria das mutações
 - Cursor de paginação assinado (hoje é `created_at.id` em texto)
-- Webhook do Kapso e envio (fase 3) e a interface em Dioxus
+- Envio de mídia, e cópia da mídia recebida pro R2 (hoje fica só a URL do Kapso)
+- Sincronizar templates aprovados (`wa_templates` existe, ninguém preenche)
+- Reconciliação por Cron Trigger: buscar no Kapso as mensagens recentes quando o webhook ficar
+  fora do ar mais que os ~50s de retry
+- Alerta quando algo cair na `crm-inbound-dlq`
+- Detecção de opt-out ("parar", "sair") marcando `is_blocked`
+- Interface em Dioxus

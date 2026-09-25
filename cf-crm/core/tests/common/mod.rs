@@ -109,6 +109,11 @@ impl Env {
     pub fn ctx(&self, now: i64) -> Ctx<'_, SqliteDb> {
         Ctx::new(&self.db, now, Some("user-1".to_string()), &*self.ids)
     }
+
+    /// Sem ator: webhook, Alarm.
+    pub fn system(&self, now: i64) -> Ctx<'_, SqliteDb> {
+        Ctx::new(&self.db, now, None, &*self.ids)
+    }
 }
 
 #[macro_export]

@@ -20,6 +20,27 @@ bindings = [{ name = "TENANT", class_name = "TenantDo" }]
 tag = "v1"
 new_sqlite_classes = ["TenantDo"]
 
+# Eventos do webhook do Kapso: o Worker enfileira e responde 200 na hora;
+# o consumer entrega cada evento ao DO do tenant.
+[[queues.producers]]
+binding = "INBOUND"
+queue = "crm-inbound"
+
+[[queues.consumers]]
+queue = "crm-inbound"
+max_batch_size = 25
+max_batch_timeout = 1
+# Evento de status que chega antes do wamid ser gravado volta pra fila (30s)
+# por até ~2 min; 10 tentativas cobrem isso com folga.
+max_retries = 10
+dead_letter_queue = "crm-inbound-dlq"
+
 [vars]
 # "true" só enquanto cria a primeira conta. Depois volte pra "false".
 ALLOW_SIGNUP = "false"
+# Proxy da Cloud API no Kapso. Em teste local aponta pra um servidor falso.
+KAPSO_API_BASE = "https://api.kapso.ai/meta/whatsapp/v24.0"
+
+# Segredos (wrangler secret put NOME), nunca em [vars]:
+#   KAPSO_API_KEY         chave do projeto no Kapso (header X-API-Key)
+#   KAPSO_WEBHOOK_SECRET  segredo do webhook (assina X-Webhook-Signature)
