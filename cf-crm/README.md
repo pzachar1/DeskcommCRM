@@ -324,8 +324,16 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   telefone, sem número cadastrado ou com contato bloqueado; com mais de um número aparece um
   seletor de qual usar (o padrão é o primeiro).
 - **Janela de 24h:** conversa aberta por nós nasce fora da janela, então texto livre volta 422.
-  A caixa de entrada agora avisa isso acima do campo (`service_window_open` do `InboxItem`).
-  Enviar template pela tela ainda não existe.
+  A caixa de entrada avisa isso (`service_window_open` do `InboxItem`) e, com a janela fechada,
+  troca o campo de texto pelo formulário de template.
+- **Enviar template:** nome (a-z, 0-9, `_`), idioma (padrão `pt_BR`) e as variáveis do corpo,
+  uma por linha, que viram `components: [{ type: "body", parameters: [{ type: "text" }] }]` na
+  ordem `{{1}}`, `{{2}}`. O nome é digitado à mão porque `wa_templates` ainda não é
+  sincronizada com a Meta; quem recusa nome inexistente é a Meta (o erro volta na mensagem). Com
+  a janela aberta o link "enviar template" abre o mesmo formulário. Na thread o template
+  aparece como `template: <nome>` (o texto renderizado não é guardado).
+- **A tela não atualiza sozinha:** nem a lista nem a thread fazem polling. Mensagem que chega
+  depois de aberta só aparece ao reabrir a conversa ou recarregar.
 - Sem número cadastrado o webhook descarta a mensagem: por isso essa tela vem antes de qualquer
   teste real com o Kapso.
 - Provado com Playwright (14 verificações): erro de telefone sem DDI, E.164, Enter salva, busca,
@@ -346,7 +354,8 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
 - Detecção de opt-out ("parar", "sair") marcando `is_blocked`
 - Interface: login, caixa de entrada, kanban/métricas, contatos e números de WhatsApp. Faltam
   editar contato, editar/detalhe de lead (título, valor, descrição só pela API), ligar lead a
-  contato pela tela e enviar template (fora da janela de 24h a tela só avisa, não envia)
+  contato pela tela, catálogo de templates aprovados (hoje o nome é digitado à mão) e envio de
+  mídia
 - Kanban sem arraste (só os botões ◀/▶) e sem reordenar dentro da mesma coluna
 - Seletor de tenant na interface (hoje sempre abre no primeiro tenant do usuário)
 - Paginação na lista de conversas e no scroll da thread (hoje só a primeira página)

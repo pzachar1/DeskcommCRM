@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::api::{self, InboxItem, Message};
-use crate::app::{use_session_gate, PendingConversation};
+use crate::app::{use_session_gate, PendingConversation, SessionSignal};
 
 #[component]
 pub fn Inbox() -> Element {
@@ -16,6 +16,11 @@ pub fn Inbox() -> Element {
     let mut selected = use_signal(|| pending.peek().clone());
     let mut compose = use_signal(String::new);
     let mut send_error = use_signal(|| None::<String>);
+    let session = use_context::<SessionSignal>();
+    let mut template_open = use_signal(|| false);
+    let mut tpl_name = use_signal(String::new);
+    let mut tpl_lang = use_signal(|| "pt_BR".to_string());
+    let mut tpl_vars = use_signal(String::new);
 
     let mut conversations = use_resource({
         let tenant_id = tenant_id.clone();
@@ -84,6 +89,29 @@ pub fn Inbox() -> Element {
         }
     };
 
+    let send_template = move || {
+        let Some(conv_id) = selected() else { return };
+        let Some(s) = session() else { return };
+        let (name, lang) = (tpl_name(), tpl_lang());
+        if name.trim().is_empty() {
+            send_error.set(Some("informe o nome do template".into()));
+            return;
+        }
+        let vars: Vec<String> = tpl_vars().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+        spawn(async move {
+            send_error.set(None);
+            match api::send_template(&s.tenant_id, &conv_id, &name, &lang, &vars).await {
+                Ok(_) => {
+                    tpl_vars.set(String::new());
+                    template_open.set(false);
+                    messages.restart();
+                    conversations.restart();
+                }
+                Err(e) => send_error.set(Some(e.message)),
+            }
+        });
+    };
+
     let window_closed = match (&*conversations.read(), selected()) {
         (Some(Ok(page)), Some(id)) => page
             .items
@@ -131,19 +159,47 @@ pub fn Inbox() -> Element {
                             "Janela de 24h fechada: o WhatsApp só aceita template aprovado até o contato responder."
                         }
                     }
-                    div {
-                        class: "composer",
-                        input {
-                            r#type: "text",
-                            placeholder: "escreva uma mensagem",
-                            value: "{compose}",
-                            oninput: move |ev| compose.set(ev.value()),
-                            onkeydown: {
-                                let send = send.clone();
-                                move |ev: KeyboardEvent| if ev.key() == Key::Enter { send(()) }
-                            },
+                    if window_closed || template_open() {
+                        div { class: "composer template-form",
+                            input {
+                                r#type: "text",
+                                placeholder: "nome do template (a-z, 0-9, _)",
+                                value: "{tpl_name}",
+                                oninput: move |ev| tpl_name.set(ev.value()),
+                            }
+                            input {
+                                class: "tpl-lang",
+                                r#type: "text",
+                                placeholder: "idioma",
+                                value: "{tpl_lang}",
+                                oninput: move |ev| tpl_lang.set(ev.value()),
+                            }
+                            textarea {
+                                placeholder: "variáveis do corpo, uma por linha ({{{{1}}}}, {{{{2}}}}...)",
+                                value: "{tpl_vars}",
+                                oninput: move |ev| tpl_vars.set(ev.value()),
+                            }
+                            button { onclick: move |_| { let mut go = send_template; go() }, "Enviar template" }
                         }
-                        button { onclick: move |_| send(()), "Enviar" }
+                        if !window_closed {
+                            button { class: "link-button tpl-toggle", onclick: move |_| template_open.set(false), "voltar pra mensagem de texto" }
+                        }
+                    } else {
+                        div {
+                            class: "composer",
+                            input {
+                                r#type: "text",
+                                placeholder: "escreva uma mensagem",
+                                value: "{compose}",
+                                oninput: move |ev| compose.set(ev.value()),
+                                onkeydown: {
+                                    let send = send.clone();
+                                    move |ev: KeyboardEvent| if ev.key() == Key::Enter { send(()) }
+                                },
+                            }
+                            button { onclick: move |_| send(()), "Enviar" }
+                        }
+                        button { class: "link-button tpl-toggle", onclick: move |_| template_open.set(true), "enviar template" }
                     }
                     if let Some(msg) = send_error() {
                         p { class: "form-error", "{msg}" }
@@ -180,7 +236,11 @@ fn MessageBubble(message: Message) -> Element {
     let class = if message.direction == "outbound" { "bubble outbound" } else { "bubble inbound" };
     rsx! {
         div { class,
-            p { "{message.body.clone().unwrap_or_default()}" }
+            if let Some(t) = message.template_name.clone() {
+                p { class: "bubble-template", "template: {t}" }
+            } else {
+                p { "{message.body.clone().unwrap_or_default()}" }
+            }
             if let Some(err) = message.error_message.clone() {
                 p { class: "bubble-error", "{err}" }
             }
