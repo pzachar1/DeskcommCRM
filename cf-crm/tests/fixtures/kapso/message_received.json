@@ -1,0 +1,40 @@
+{
+  "message": {
+    "id": "wamid.123",
+    "timestamp": "1730092800",
+    "type": "text",
+    "text": {
+      "body": "Hello"
+    },
+    "kapso": {
+      "direction": "inbound",
+      "status": "received",
+      "processing_status": "pending",
+      "origin": "cloud_api",
+      "has_media": false,
+      "content": "Hello"
+    }
+  },
+  "conversation": {
+    "id": "conv_123",
+    "phone_number": "+15551234567",
+    "status": "active",
+    "last_active_at": "2025-10-28T14:25:01Z",
+    "created_at": "2025-10-28T13:40:00Z",
+    "updated_at": "2025-10-28T14:25:01Z",
+    "metadata": {},
+    "phone_number_id": "123456789012345",
+    "kapso": {
+      "contact_name": "John Doe",
+      "messages_count": 1,
+      "last_message_id": "wamid.123",
+      "last_message_type": "text",
+      "last_message_timestamp": "2025-10-28T14:25:01Z",
+      "last_message_text": "Hello",
+      "last_inbound_at": "2025-10-28T14:25:01Z",
+      "last_outbound_at": null
+    }
+  },
+  "is_new_conversation": true,
+  "phone_number_id": "123456789012345"
+}

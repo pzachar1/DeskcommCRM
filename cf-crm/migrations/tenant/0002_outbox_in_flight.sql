@@ -1,0 +1,12 @@
+-- Fase 3: envio pelo Kapso.
+--
+-- Muda o caminho descrito no comentário da tabela `outbox` na 0001: quem chama o
+-- Kapso é o próprio Alarm do DO, sem passar pela Queue. O Alarm já tem retry, e
+-- a linha da outbox guarda tentativas e próximo horário.
+--
+-- in_flight_at: o Alarm grava ANTES de chamar o Kapso e apaga quando a resposta
+-- chega. Se o DO cair no meio da chamada, a linha fica marcada. Depois do prazo, a
+-- mensagem vira 'failed' (send_outcome_unknown) em vez de sair de novo: não dá pra
+-- saber se o Kapso aceitou, e mensagem em dobro pro cliente é pior que uma falha
+-- visível que a equipe reenvia.
+ALTER TABLE outbox ADD COLUMN in_flight_at INTEGER;
