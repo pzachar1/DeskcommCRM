@@ -317,6 +317,15 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
 - **WhatsApp** (`/whatsapp`): lista e cadastra números (`/api/v1/whatsapp-numbers`). A API só
   deixa `admin` cadastrar, então `Session` passou a guardar o `role` (vem de `GET /api/v1/me`)
   e o formulário some pra quem não é admin. Mostra onde apontar o webhook no Kapso.
+- **Conversar a partir do contato:** o botão da linha chama `POST /api/v1/conversations`
+  (acha ou cria: clicar de novo reaproveita a conversa) e leva pra caixa de entrada já com ela
+  selecionada. O handoff é um `Signal<Option<String>>` em contexto (`PendingConversation`), não
+  parâmetro de rota — a caixa de entrada lê na hora de montar e zera. Fica desabilitado sem
+  telefone, sem número cadastrado ou com contato bloqueado; com mais de um número aparece um
+  seletor de qual usar (o padrão é o primeiro).
+- **Janela de 24h:** conversa aberta por nós nasce fora da janela, então texto livre volta 422.
+  A caixa de entrada agora avisa isso acima do campo (`service_window_open` do `InboxItem`).
+  Enviar template pela tela ainda não existe.
 - Sem número cadastrado o webhook descarta a mensagem: por isso essa tela vem antes de qualquer
   teste real com o Kapso.
 - Provado com Playwright (14 verificações): erro de telefone sem DDI, E.164, Enter salva, busca,
@@ -336,8 +345,8 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
 - Alerta quando algo cair na `crm-inbound-dlq`
 - Detecção de opt-out ("parar", "sair") marcando `is_blocked`
 - Interface: login, caixa de entrada, kanban/métricas, contatos e números de WhatsApp. Faltam
-  editar contato, editar/detalhe de lead (título, valor, descrição só pela API), começar
-  conversa a partir do contato e ligar lead a contato pela tela
+  editar contato, editar/detalhe de lead (título, valor, descrição só pela API), ligar lead a
+  contato pela tela e enviar template (fora da janela de 24h a tela só avisa, não envia)
 - Kanban sem arraste (só os botões ◀/▶) e sem reordenar dentro da mesma coluna
 - Seletor de tenant na interface (hoje sempre abre no primeiro tenant do usuário)
 - Paginação na lista de conversas e no scroll da thread (hoje só a primeira página)

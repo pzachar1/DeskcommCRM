@@ -80,3 +80,8 @@ button { cursor: pointer; }
 .table th { color: #666; font-weight: 600; background: #fafafa; }
 .tag { margin-left: 0.5rem; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.7rem; }
 .tag-blocked { background: #fee2e2; color: #b91c1c; }
+
+.cell-actions { text-align: right; }
+.row-button { padding: 0.25rem 0.7rem; border: 1px solid #2563eb; border-radius: 4px; background: #fff; color: #2563eb; font-size: 0.8rem; }
+.row-button:disabled { opacity: 0.35; cursor: not-allowed; }
+.window-closed { margin: 0; padding: 0.5rem 1rem; background: #fffbeb; border-top: 1px solid #fde68a; color: #92400e; }

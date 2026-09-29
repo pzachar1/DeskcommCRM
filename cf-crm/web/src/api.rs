@@ -369,3 +369,15 @@ pub async fn add_number(
         .map_err(net_err)?;
     envelope(resp).await
 }
+
+pub async fn open_conversation(tenant_id: &str, contact_id: &str, phone_number_id: &str) -> Result<Conversation, ApiError> {
+    let resp = Request::post("/api/v1/conversations")
+        .header("Content-Type", "application/json")
+        .header(TENANT_HEADER, tenant_id)
+        .json(&serde_json::json!({ "contact_id": contact_id, "phone_number_id": phone_number_id }))
+        .map_err(net_err)?
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}

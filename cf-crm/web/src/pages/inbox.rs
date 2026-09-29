@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::api::{self, InboxItem, Message};
-use crate::app::use_session_gate;
+use crate::app::{use_session_gate, PendingConversation};
 
 #[component]
 pub fn Inbox() -> Element {
@@ -12,7 +12,8 @@ pub fn Inbox() -> Element {
     };
     let tenant_id = current.tenant_id.clone();
 
-    let mut selected = use_signal(|| None::<String>);
+    let mut pending = use_context::<PendingConversation>();
+    let mut selected = use_signal(|| pending.peek().clone());
     let mut compose = use_signal(String::new);
     let mut send_error = use_signal(|| None::<String>);
 
@@ -36,6 +37,18 @@ pub fn Inbox() -> Element {
                 }
             }
         }
+    });
+
+    // Vindo de "Conversar" em Contatos: a conversa já está selecionada; falta zerar o não lida.
+    let tenant_for_pending = tenant_id.clone();
+    use_effect(move || {
+        let Some(id) = pending() else { return };
+        pending.set(None);
+        let tenant_id = tenant_for_pending.clone();
+        spawn(async move {
+            let _ = api::mark_read(&tenant_id, &id).await;
+            conversations.restart();
+        });
     });
 
     let open_conversation = move |item: InboxItem| {
@@ -71,6 +84,15 @@ pub fn Inbox() -> Element {
         }
     };
 
+    let window_closed = match (&*conversations.read(), selected()) {
+        (Some(Ok(page)), Some(id)) => page
+            .items
+            .iter()
+            .find(|i| i.conversation.id == id)
+            .is_some_and(|i| !i.service_window_open),
+        _ => false,
+    };
+
     rsx! {
         div { class: "inbox",
             aside { class: "conversation-list",
@@ -102,6 +124,11 @@ pub fn Inbox() -> Element {
                             },
                             Some(Some(Err(e))) => rsx! { p { class: "form-error", "{e.message}" } },
                             _ => rsx! { p { class: "empty", "carregando mensagens..." } },
+                        }
+                    }
+                    if window_closed {
+                        p { class: "hint window-closed",
+                            "Janela de 24h fechada: o WhatsApp só aceita template aprovado até o contato responder."
                         }
                     }
                     div {

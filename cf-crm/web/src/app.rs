@@ -12,6 +12,9 @@ pub struct Session {
 
 pub type SessionSignal = Signal<Option<Session>>;
 
+/// Conversa que a caixa de entrada deve abrir ao montar (ex.: vinda de "Conversar" em Contatos).
+pub type PendingConversation = Signal<Option<String>>;
+
 #[derive(Routable, Clone, Debug, PartialEq)]
 #[rustfmt::skip]
 pub enum Route {
@@ -34,6 +37,7 @@ const MAIN_CSS: Asset = asset!("/assets/main.css");
 #[component]
 pub fn App() -> Element {
     use_context_provider(|| Signal::new(Option::<Session>::None));
+    use_context_provider(|| Signal::new(Option::<String>::None));
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
