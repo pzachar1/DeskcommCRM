@@ -1,4 +1,4 @@
-# crm-schema / crm-core / crm-worker
+# crm-schema / crm-core / crm-worker / crm-web
 
 CRM em Rust + Cloudflare, construído a partir do domínio do DeskcommCRM
 (`supabase/baseline.sql`), com WhatsApp pela API oficial via Kapso.
@@ -9,6 +9,7 @@ Esta pasta é independente do resto do repositório e foi feita pra virar um rep
 | `crm-schema` | `.` | migrations (D1 e DO), structs do modelo, contrato do webhook do Kapso |
 | `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline, conversas, entrada e envio de WhatsApp. Sem runtime: o banco entra por um trait |
 | `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel, webhook do Kapso, consumer da Queue) + Durable Object por tenant |
+| `crm-web` | `web/` | Interface (Dioxus/WASM): login e caixa de entrada do WhatsApp. Fica FORA do workspace (`exclude` no `Cargo.toml` raiz) — Cargo lock próprio, sem disputar versão de `wasm-bindgen` com o worker |
 
 ```bash
 cargo test                                                 # schema + core, SQLite de verdade no host
@@ -31,10 +32,41 @@ python3 e2e/smoke.py http://127.0.0.1:8787      # fase 2: 34 verificações pela
 python3 e2e/whatsapp.py http://127.0.0.1:8787   # fase 3: 36 verificações, com um Kapso falso na porta 8799
 ```
 
+### Rodar a interface (fase 4, Dioxus)
+
+A interface é servida pelo PRÓPRIO Worker como asset estático, na mesma origem —
+o cookie de sessão é `HttpOnly; Secure; SameSite=Strict` e não atravessaria uma
+origem separada (ex.: Cloudflare Pages num subdomínio à parte). `wrangler.toml`
+declara `[assets]` apontando pro build do Dioxus e `run_worker_first` garante
+que `/api/*`, `/webhooks/*`, `/health` e `/internal/*` continuam caindo no
+Worker mesmo com o binding de assets presente.
+
+```bash
+cargo install dioxus-cli --version "^0.6" --locked   # uma vez só
+
+cd web
+dx build --release        # gera web/target/dx/crm-web/release/web/public
+
+cd ../worker
+npx wrangler dev --port 8787
+```
+
+**Sempre que rodar `dx build` de novo, reinicie o `wrangler dev`.** O layout e
+o nome dos arquivos gerados podem mudar de um build pro outro (fingerprint por
+conteúdo, brotli), e o `wrangler dev` local fotografa o diretório de assets só
+na hora que sobe — servindo o build antigo (ou 404/405 do jeito errado) até
+reiniciar.
+
+Sem build nenhum do Dioxus, `/` cai no fallback de SPA e devolve HTML vazio;
+rode `dx build` pelo menos uma vez antes do primeiro `wrangler dev`.
+
 ### Subir em produção
 
 ```bash
-cd worker
+cd web
+dx build --release                          # antes do deploy: gera o build que o [assets] do worker serve
+
+cd ../worker
 npx wrangler d1 create crm                  # e cole o id no wrangler.toml
 npx wrangler d1 migrations apply crm --remote
 npx wrangler queues create crm-inbound
@@ -228,6 +260,25 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   `tests/fixtures/kapso/`) e no `wrangler dev` com D1, DO, Queue e Alarm locais contra um
   servidor HTTP que faz o papel do Kapso (`e2e/whatsapp.py`).
 
+## Como a fase 4 funciona por dentro
+
+- **Login** (`POST /api/v1/auth/login` + `GET /api/v1/me`): a sessão vive só no cookie
+  `HttpOnly`, então o front não guarda token nenhum — todo carregamento de `/` chama
+  `GET /api/v1/me` de novo pra reconstruir o estado (`Signal<Option<Session>>`), e um 401
+  manda pra `/login` via `dioxus-router`.
+- **Caixa de entrada**: lista conversas (`GET /api/v1/conversations`), abre a thread
+  (`GET /api/v1/conversations/{id}/messages`) e marca como lida ao abrir
+  (`POST .../read` — precisa de `Content-Type: application/json` mesmo sem corpo de verdade,
+  senão o proxy do Worker barra com 415 e a chamada falha calada).
+- **Envio**: `POST /api/v1/conversations/{id}/messages` com `{ type: "text", body }`; a
+  confirmação otimista vem da resposta da chamada, não de polling.
+- **Sem `<form>`**: os dois formulários (login e composer) usam `div` + `onclick`/`onkeydown`
+  no lugar de `onsubmit`. Um `<form>` sem `prevent_default` corretamente amarrado recarrega a
+  página de verdade (perde o estado do WASM) — mais simples evitar o elemento inteiro.
+- Provado com Playwright de verdade (Chromium) contra `wrangler dev` + um Kapso falso: login,
+  mensagem entrando pelo webhook aparecendo na tela, badge de não lida sumindo ao abrir, e
+  envio chegando no Kapso falso.
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)
@@ -241,4 +292,7 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   fora do ar mais que os ~50s de retry
 - Alerta quando algo cair na `crm-inbound-dlq`
 - Detecção de opt-out ("parar", "sair") marcando `is_blocked`
-- Interface em Dioxus
+- Interface: só login + caixa de entrada. Faltam pipeline/kanban, contatos e cadastro de
+  número de WhatsApp pela tela (hoje só por API)
+- Seletor de tenant na interface (hoje sempre abre no primeiro tenant do usuário)
+- Paginação na lista de conversas e no scroll da thread (hoje só a primeira página)

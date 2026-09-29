@@ -20,3 +20,6 @@ members = ["core", "worker"]
 # `cargo test` na raiz roda só o que executa no host; o worker é wasm.
 default-members = [".", "core"]
 resolver = "2"
+# `web` (Dioxus) fica fora: cargo lock separado, sem disputar versão de
+# wasm-bindgen com o worker (que fixa "=0.2.128").
+exclude = ["web"]
