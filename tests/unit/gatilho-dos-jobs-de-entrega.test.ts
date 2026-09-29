@@ -229,6 +229,17 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
     efeito: "Este é o check obrigatório `build-and-size` (`pnpm build` em Node 22).",
   },
 
+  // O gate do CRM em Rust. Quem o liga e desliga é o `paths:` do workflow (só PR
+  // e push que tocam `cf-crm/**`), não um `if:` no job — e é por isso que ele
+  // entra aqui com `condicao: null`.
+  "cf-crm.yml::cargo": {
+    condicao: null,
+    efeito:
+      "Este job é o ÚNICO que roda `cargo test` e compila o Worker para wasm. " +
+      "Desligá-lo devolve o `cf-crm/` ao estado anterior a ele: entrar na `main` sem gate, " +
+      "com o verde valendo o que alguém disse que rodou na própria máquina.",
+  },
+
   // --- e o que legitimamente tem interruptor -----------------------------------
   "acolhida.yml::acolher": {
     condicao:

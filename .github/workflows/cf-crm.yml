@@ -1,0 +1,67 @@
+name: cf-crm
+
+# O `cf-crm/` é Rust + Cloudflare e nenhum outro workflow deste repositório o
+# alcança: o `ci.yml` roda pnpm (typecheck, lint, vitest) e nada ali chama
+# `cargo`. Até este arquivo, o CRM em Rust entrava na `main` sem gate nenhum —
+# o verde era o que alguém disse que rodou na própria máquina.
+#
+# Dois passos, os mesmos que o README do cf-crm manda rodar:
+#   1. `cargo test` — schema e core num SQLite de verdade (no host)
+#   2. `cargo check -p crm-worker --target wasm32-unknown-unknown` — o Worker só
+#      compila para wasm, então o `cargo test` da raiz não o toca
+#
+# O que NÃO está aqui, de propósito: as suítes `worker/e2e/*.py`. Elas precisam
+# do `wrangler dev` (workerd + build de release do wasm), levam minutos e
+# baixam o workerd a cada rodada. Continuam sendo prova manual antes do PR.
+#
+# Só dispara quando o PR ou o push toca o `cf-crm/` (ou este arquivo): o resto
+# do repositório não depende dele, e um job Rust em todo PR de Next.js é fila
+# sem retorno.
+on:
+  pull_request:
+    paths:
+      - "cf-crm/**"
+      - ".github/workflows/cf-crm.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cf-crm/**"
+      - ".github/workflows/cf-crm.yml"
+  workflow_dispatch: {}
+
+# Só leitura: o job compila e testa, não comenta nem publica nada.
+permissions:
+  contents: read
+
+jobs:
+  cargo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cf-crm
+    steps:
+      - uses: actions/checkout@v7
+
+      # O runner já traz rustup; só falta o alvo do Worker.
+      - name: Alvo wasm32 do Worker
+        run: rustup target add wasm32-unknown-unknown
+
+      # Cache do registro e do target, chaveado pelo Cargo.lock: sem ele cada
+      # rodada recompila argon2, worker e rusqlite (bundled) do zero.
+      - name: Cache do cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            cf-crm/target
+          key: cf-crm-${{ runner.os }}-${{ hashFiles('cf-crm/Cargo.lock') }}
+          restore-keys: cf-crm-${{ runner.os }}-
+
+      - name: cargo test (schema + core, SQLite de verdade)
+        run: cargo test --locked
+
+      - name: cargo check do Worker (wasm32)
+        run: cargo check --locked -p crm-worker --target wasm32-unknown-unknown

@@ -15,6 +15,10 @@ cargo test                                                 # schema + core, SQLi
 cargo check -p crm-worker --target wasm32-unknown-unknown  # o worker só compila pra wasm
 ```
 
+Os dois rodam no CI (`.github/workflows/cf-crm.yml`) em todo PR e push na `main` que toca
+`cf-crm/`. As suítes `worker/e2e/*.py` não: precisam do `wrangler dev` e continuam sendo
+prova manual antes do PR.
+
 ### Rodar o worker local (D1 + Durable Object no workerd)
 
 ```bash
