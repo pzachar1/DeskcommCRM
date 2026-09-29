@@ -141,6 +141,24 @@ pub struct Board {
     pub columns: Vec<Column>,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Contact {
+    pub id: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub phone_e164: Option<String>,
+    pub is_blocked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct WhatsappNumber {
+    pub phone_number_id: String,
+    pub display_phone: String,
+    pub waba_id: Option<String>,
+    pub label: Option<String>,
+    pub status: String,
+}
+
 async fn envelope<T: DeserializeOwned>(resp: gloo_net::http::Response) -> Result<T, ApiError> {
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
@@ -278,6 +296,73 @@ pub async fn move_lead(
         .header("Content-Type", "application/json")
         .header(TENANT_HEADER, tenant_id)
         .json(&serde_json::json!({ "stage_id": stage_id, "lost_reason": lost_reason }))
+        .map_err(net_err)?
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+fn none_if_blank(s: &str) -> Option<&str> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
+}
+
+pub async fn list_contacts(tenant_id: &str, q: &str) -> Result<Page<Contact>, ApiError> {
+    let resp = Request::get("/api/v1/contacts")
+        .query([("limit", "100"), ("q", q.trim())])
+        .header(TENANT_HEADER, tenant_id)
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+pub async fn create_contact(tenant_id: &str, name: &str, email: &str, phone: &str) -> Result<Contact, ApiError> {
+    let resp = Request::post("/api/v1/contacts")
+        .header("Content-Type", "application/json")
+        .header(TENANT_HEADER, tenant_id)
+        .json(&serde_json::json!({
+            "name": none_if_blank(name),
+            "email": none_if_blank(email),
+            "phone": none_if_blank(phone),
+        }))
+        .map_err(net_err)?
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+pub async fn list_numbers(tenant_id: &str) -> Result<Vec<WhatsappNumber>, ApiError> {
+    let resp = Request::get("/api/v1/whatsapp-numbers")
+        .header(TENANT_HEADER, tenant_id)
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+pub async fn add_number(
+    tenant_id: &str,
+    phone_number_id: &str,
+    display_phone: &str,
+    label: &str,
+    waba_id: &str,
+) -> Result<WhatsappNumber, ApiError> {
+    let resp = Request::post("/api/v1/whatsapp-numbers")
+        .header("Content-Type", "application/json")
+        .header(TENANT_HEADER, tenant_id)
+        .json(&serde_json::json!({
+            "phone_number_id": phone_number_id.trim(),
+            "display_phone": display_phone.trim(),
+            "label": none_if_blank(label),
+            "waba_id": none_if_blank(waba_id),
+        }))
         .map_err(net_err)?
         .send()
         .await

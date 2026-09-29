@@ -309,6 +309,19 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   a métrica de ganhos subir, mover outro lead pra "Perdido" e confirmar que aparece o prompt
   pedindo o motivo.
 
+## Contatos e números de WhatsApp pela tela
+
+- **Contatos** (`/contacts`): lista (`GET /api/v1/contacts?q=`, até 100, busca a cada tecla),
+  cria com nome/e-mail/telefone (`POST`). O telefone é normalizado pela API em E.164 e o erro
+  ("informe o DDI") aparece como veio. Bloqueado (opt-out) ganha uma etiqueta.
+- **WhatsApp** (`/whatsapp`): lista e cadastra números (`/api/v1/whatsapp-numbers`). A API só
+  deixa `admin` cadastrar, então `Session` passou a guardar o `role` (vem de `GET /api/v1/me`)
+  e o formulário some pra quem não é admin. Mostra onde apontar o webhook no Kapso.
+- Sem número cadastrado o webhook descarta a mensagem: por isso essa tela vem antes de qualquer
+  teste real com o Kapso.
+- Provado com Playwright (14 verificações): erro de telefone sem DDI, E.164, Enter salva, busca,
+  `phone_number_id` inválido, número repetido (409) e recarregar a página mantendo a sessão.
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)
@@ -322,9 +335,9 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   fora do ar mais que os ~50s de retry
 - Alerta quando algo cair na `crm-inbound-dlq`
 - Detecção de opt-out ("parar", "sair") marcando `is_blocked`
-- Interface: login, caixa de entrada e kanban/métricas. Faltam contatos e cadastro de número
-  de WhatsApp pela tela (hoje só por API), e edição/detalhe de lead (título, valor, descrição
-  só dão pra mudar pela API)
+- Interface: login, caixa de entrada, kanban/métricas, contatos e números de WhatsApp. Faltam
+  editar contato, editar/detalhe de lead (título, valor, descrição só pela API), começar
+  conversa a partir do contato e ligar lead a contato pela tela
 - Kanban sem arraste (só os botões ◀/▶) e sem reordenar dentro da mesma coluna
 - Seletor de tenant na interface (hoje sempre abre no primeiro tenant do usuário)
 - Paginação na lista de conversas e no scroll da thread (hoje só a primeira página)

@@ -33,7 +33,7 @@ pub fn Login() -> Element {
             match api::me().await {
                 Ok(me) => match me.tenants.first() {
                     Some(m) => {
-                        session.set(Some(Session { user: me.user, tenant_id: m.tenant_id.clone() }));
+                        session.set(Some(Session { user: me.user, tenant_id: m.tenant_id.clone(), role: m.role.clone() }));
                         nav.push(Route::Inbox {});
                     }
                     None => error.set(Some("sua conta ainda não tem nenhum tenant".into())),

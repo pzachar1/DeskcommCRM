@@ -1,12 +1,13 @@
 use dioxus::prelude::*;
 
 use crate::api;
-use crate::pages::{dashboard::Dashboard, inbox::Inbox, login::Login};
+use crate::pages::{contacts::Contacts, dashboard::Dashboard, inbox::Inbox, login::Login, whatsapp::Whatsapp};
 
 #[derive(Clone, PartialEq)]
 pub struct Session {
     pub user: api::User,
     pub tenant_id: String,
+    pub role: String,
 }
 
 pub type SessionSignal = Signal<Option<Session>>;
@@ -19,6 +20,10 @@ pub enum Route {
         Inbox {},
         #[route("/dashboard")]
         Dashboard {},
+        #[route("/contacts")]
+        Contacts {},
+        #[route("/whatsapp")]
+        Whatsapp {},
     #[end_layout]
     #[route("/login")]
     Login {},
@@ -48,7 +53,7 @@ pub fn use_session_gate() -> Option<Session> {
             spawn(async move {
                 match api::me().await {
                     Ok(me) => match me.tenants.first() {
-                        Some(m) => session.set(Some(Session { user: me.user, tenant_id: m.tenant_id.clone() })),
+                        Some(m) => session.set(Some(Session { user: me.user, tenant_id: m.tenant_id.clone(), role: m.role.clone() })),
                         None => {
                             nav.push(Route::Login {});
                         }
@@ -91,6 +96,16 @@ fn Shell() -> Element {
                         to: Route::Dashboard {},
                         class: if route == (Route::Dashboard {}) { "shell-link active" } else { "shell-link" },
                         "Kanban"
+                    }
+                    Link {
+                        to: Route::Contacts {},
+                        class: if route == (Route::Contacts {}) { "shell-link active" } else { "shell-link" },
+                        "Contatos"
+                    }
+                    Link {
+                        to: Route::Whatsapp {},
+                        class: if route == (Route::Whatsapp {}) { "shell-link active" } else { "shell-link" },
+                        "WhatsApp"
                     }
                 }
                 span { class: "shell-user",
