@@ -41,6 +41,25 @@ ALLOW_SIGNUP = "false"
 # Proxy da Cloud API no Kapso. Em teste local aponta pra um servidor falso.
 KAPSO_API_BASE = "https://api.kapso.ai/meta/whatsapp/v24.0"
 
+# ---------------------------------------------------------------- agente
+# QUEM gera a resposta é escolha de cada tenant (PUT /api/v1/agent: provider,
+# modelo, prompt). Daqui sai só ONDE falar. Vazio = não configurado, e aí a
+# rodada falha com `model_not_configured` e a conversa vai para humano — nunca
+# fica tentando.
+#
+# Caminho recomendado: AI Gateway. Preencha os dois e os DOIS provedores passam
+# por ele (cache, log e teto de gasto, sem código a mais).
+AI_GATEWAY_ACCOUNT_ID = ""
+AI_GATEWAY_NAME = ""
+# Sem gateway: a Anthropic é falada direto (api.anthropic.com) e o Workers AI
+# precisa da conta para montar .../ai/run.
+CF_ACCOUNT_ID = ""
+# Base explícita, quando existir, MANDA. Serve ao teste local (e2e/agente.py
+# sobe um modelo falso) e a quem põe proxy próprio na frente:
+#   ANTHROPIC_API_BASE, WORKERS_AI_API_BASE
+
 # Segredos (wrangler secret put NOME), nunca em [vars]:
 #   KAPSO_API_KEY         chave do projeto no Kapso (header X-API-Key)
 #   KAPSO_WEBHOOK_SECRET  segredo do webhook (assina X-Webhook-Signature)
+#   ANTHROPIC_API_KEY     chave do provedor, quando provider = 'anthropic'
+#   WORKERS_AI_TOKEN      token da Cloudflare, quando provider = 'workers_ai'

@@ -1,1 +1,6 @@
 /target
+
+# wrangler dev: segredos locais e estado do workerd (D1, DO, Queue no disco)
+.dev.vars
+.wrangler/
+node_modules/

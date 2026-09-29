@@ -408,6 +408,12 @@ describe("catraca: ninguém mais repete o namespace", () => {
       // árvores do repo, com o gate delas próprio.
       "evidence",
       ".claude",
+      // Saída do `cargo` e do `wrangler dev` no `cf-crm/`: medido em 29/09/2026,
+      // o `cf-crm/target` sozinho tinha 1,3 GB e levou esta varredura de
+      // segundos a 57 s — estouro do timeout de 15 s em quem só tinha compilado
+      // o CRM em Rust. Artefato de build, e nenhum monta referência de imagem.
+      "target",
+      ".wrangler",
     ].map((d) => `--exclude-dir=${d}`);
     // `.bak`/`.orig`/`.rej`/`~` são sobra de editor e de `sed -i.bak`. Sem isto,
     // uma sabotagem local deixa o gate vermelho pelo motivo errado.

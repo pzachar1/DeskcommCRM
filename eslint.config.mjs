@@ -14,7 +14,12 @@ export default defineConfig([
   // Cópias compiladas da demonstração e binários baixados pelo Playwright
   // vivem no scratch local. Os scripts escritos à mão em .superpowers seguem
   // sob lint; somente estes dois tipos de artefato gerado ficam de fora.
-  globalIgnores([".next/", "node_modules/", "dist/", "supabase/", "next-env.d.ts", ".claude/worktrees/", ".superpowers/**/bundles/", ".superpowers/**/playwright-browsers/"]),
+  // O `cf-crm/` é Rust: compilá-lo deixa JS GERADO no disco — o `build/` do
+  // `worker-build` (sempre) e o `.wrangler/tmp` do `wrangler dev` (enquanto
+  // roda). O ESLint não lê o `.gitignore`, e medido em 29/09/2026 esse JS dava
+  // 37 erros de `no-unused-expressions` em quem só tinha rodado o `cargo`. Na
+  // CI, checkout limpo, nenhum dos três existe.
+  globalIgnores([".next/", "node_modules/", "dist/", "supabase/", "next-env.d.ts", ".claude/worktrees/", ".superpowers/**/bundles/", ".superpowers/**/playwright-browsers/", "cf-crm/target/", "cf-crm/worker/build/", "**/.wrangler/"]),
   nextPlugin.configs["core-web-vitals"],
   reactHooks.configs.flat.recommended,
   ...tseslint.configs.recommended,

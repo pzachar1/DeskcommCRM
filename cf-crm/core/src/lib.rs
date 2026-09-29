@@ -3,6 +3,7 @@
 //! o relógio e o gerador de id entram pelo [`Ctx`].
 
 pub mod activities;
+pub mod agent;
 pub mod contacts;
 pub mod db;
 pub mod error;
@@ -11,6 +12,7 @@ pub mod inbox;
 pub mod leads;
 pub mod messaging;
 pub mod migrate;
+pub mod opt_out;
 pub mod outbox;
 pub mod pipelines;
 

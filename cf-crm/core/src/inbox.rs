@@ -8,7 +8,7 @@
 
 use crate::db::{exec, one, Db};
 use crate::messaging::{find_or_create_conversation, preview};
-use crate::{CoreError, Ctx, Result};
+use crate::{agent, opt_out, CoreError, Ctx, Result};
 use crm_schema::kapso::{self, EventPayload, WaMessage};
 use crm_schema::model::{Contact, ConversationStatus, Direction, MessageStatus, MessageType, SentVia};
 use serde::Serialize;
@@ -277,7 +277,44 @@ fn inbound<D: Db>(ctx: &Ctx<D>, p: &EventPayload, m: &WaMessage) -> Result<Inges
         "UPDATE contacts SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?) WHERE id = ?",
         &[json!(sent_at), json!(contact.id)],
     )?;
+    // Histórico importado não fala com ninguém: não bloqueia contato nem acorda
+    // agente. Só mensagem viva move o atendimento.
+    if live {
+        let texto = m.display_text();
+        if aplicar_opt_out(ctx, &contact, texto.as_deref())? {
+            agent::on_opt_out(ctx, &conv.id, &message_id)?;
+        } else {
+            agent::after_inbound(ctx, &conv.id, &contact, &message_id, message_type(m), texto.as_deref())?;
+        }
+    }
     Ok(Ingested::Stored { message_id })
+}
+
+/// QUEM PEDIU PARA SAIR é decidido na INGESTÃO, antes de qualquer agente: o
+/// bloqueio vale mesmo com o agente desligado, e é o que faz todo envio seguinte
+/// voltar `contact_blocked`. A regra (palavra isolada ou verbo de cessação com
+/// objeto de comunicação) mora em [`crate::opt_out`] e é a MESMA que o agente
+/// consulta — enquanto eram duas, a ingestão bloqueava paciente que perguntou
+/// "tem como parar a dor?".
+///
+/// Devolve `true` quando o contato está fora (pediu agora ou já estava).
+fn aplicar_opt_out<D: Db>(ctx: &Ctx<D>, contact: &Contact, texto: Option<&str>) -> Result<bool> {
+    if contact.is_blocked {
+        return Ok(true);
+    }
+    let Some(t) = texto.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(false);
+    };
+    if !opt_out::pedido_de_opt_out(t) {
+        return Ok(false);
+    }
+    exec(
+        ctx.db,
+        "UPDATE contacts SET is_blocked = 1, blocked_reason = 'opt_out', blocked_at = ?, updated_at = ?
+         WHERE id = ? AND is_blocked = 0",
+        &[json!(ctx.now_ms), json!(ctx.now_ms), json!(contact.id)],
+    )?;
+    Ok(true)
 }
 
 fn status_of(meta_status: Option<&str>) -> Option<MessageStatus> {
@@ -371,6 +408,11 @@ fn unknown_outbound<D: Db>(ctx: &Ctx<D>, p: &EventPayload, m: &WaMessage, status
             json!(conv.id),
         ],
     )?;
+    // A equipe respondeu pelo app do WhatsApp, fora do CRM: o agente cala nesta
+    // conversa do mesmo jeito que cala quando alguém responde pela tela.
+    if sent_via == SentVia::ExternalDevice {
+        agent::silence_for_human(ctx, &conv.id)?;
+    }
     Ok(Ingested::Stored { message_id })
 }
 
