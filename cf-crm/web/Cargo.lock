@@ -166,6 +166,7 @@ name = "crm-web"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "gloo-dialogs",
  "gloo-net",
  "serde",
  "serde_json",
@@ -793,6 +794,16 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "gloo-dialogs"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf4748e10122b01435750ff530095b1217cf6546173459448b83913ebe7815df"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

@@ -96,6 +96,51 @@ pub struct Message {
     pub sent_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Pipeline {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct PipelineWithStages {
+    #[serde(flatten)]
+    pub pipeline: Pipeline,
+    pub stages: Vec<Stage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Stage {
+    pub id: String,
+    pub pipeline_id: String,
+    pub name: String,
+    pub is_won: bool,
+    pub is_lost: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Lead {
+    pub id: String,
+    pub pipeline_id: String,
+    pub stage_id: String,
+    pub title: String,
+    pub status: String,
+    pub value_cents: Option<i64>,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Column {
+    pub stage: Stage,
+    pub leads: Vec<Lead>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Board {
+    pub pipeline: Pipeline,
+    pub columns: Vec<Column>,
+}
+
 async fn envelope<T: DeserializeOwned>(resp: gloo_net::http::Response) -> Result<T, ApiError> {
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
@@ -189,4 +234,53 @@ pub async fn mark_read(tenant_id: &str, conversation_id: &str) -> Result<(), Api
         .await
         .map_err(net_err)?;
     envelope::<Value>(resp).await.map(|_| ())
+}
+
+pub async fn list_pipelines(tenant_id: &str) -> Result<Vec<PipelineWithStages>, ApiError> {
+    let resp = Request::get("/api/v1/pipelines")
+        .header(TENANT_HEADER, tenant_id)
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+pub async fn get_board(tenant_id: &str, pipeline_id: &str) -> Result<Board, ApiError> {
+    let url = format!("/api/v1/pipelines/{pipeline_id}/board");
+    let resp = Request::get(&url)
+        .header(TENANT_HEADER, tenant_id)
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+pub async fn create_lead(tenant_id: &str, title: &str, stage_id: &str) -> Result<Lead, ApiError> {
+    let resp = Request::post("/api/v1/leads")
+        .header("Content-Type", "application/json")
+        .header(TENANT_HEADER, tenant_id)
+        .json(&serde_json::json!({ "title": title, "stage_id": stage_id }))
+        .map_err(net_err)?
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
+}
+
+pub async fn move_lead(
+    tenant_id: &str,
+    lead_id: &str,
+    stage_id: &str,
+    lost_reason: Option<&str>,
+) -> Result<Lead, ApiError> {
+    let url = format!("/api/v1/leads/{lead_id}/move");
+    let resp = Request::post(&url)
+        .header("Content-Type", "application/json")
+        .header(TENANT_HEADER, tenant_id)
+        .json(&serde_json::json!({ "stage_id": stage_id, "lost_reason": lost_reason }))
+        .map_err(net_err)?
+        .send()
+        .await
+        .map_err(net_err)?;
+    envelope(resp).await
 }

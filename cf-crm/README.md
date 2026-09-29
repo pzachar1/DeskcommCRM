@@ -279,6 +279,36 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   mensagem entrando pelo webhook aparecendo na tela, badge de não lida sumindo ao abrir, e
   envio chegando no Kapso falso.
 
+## Como o dashboard (kanban/métricas) funciona por dentro
+
+- **Layout compartilhado.** `Route::Inbox` e `Route::Dashboard` vivem sob `#[layout(Shell)]`
+  no `dioxus-router`; `Shell` é quem desenha a barra de topo (nav + usuário + sair) e o
+  `Outlet::<Route>`. `Login` fica fora do layout — a régua de fechar um `#[layout]` num
+  `Routable` é acumular `#[end_layout]` nos atributos do PRÓXIMO variant, então `Login` tem
+  que vir depois, nunca antes.
+- **Board vem pronto do backend.** `GET /api/v1/pipelines/{id}/board` já devolve
+  `{ pipeline, columns: [{ stage, leads }] }` na ordem certa — o front não recalcula
+  ordenação nem faz join de tabela nenhuma, só desenha.
+- **Métricas são calculadas no cliente, não vêm de endpoint próprio.** Somando
+  `value_cents` e contando `leads` por coluna, separando por `stage.is_won`/`is_lost`. Não
+  existe (ainda) um endpoint de métricas agregadas — se a conta ficar cara com volume real, é
+  candidato a mover pro backend.
+- **Mover de etapa é botão, não arraste.** `◀`/`▶` chamam `POST /api/v1/leads/{id}/move` pra
+  coluna vizinha (sem `prev_lead_id`/`next_lead_id`, então o card entra sempre no fim da
+  coluna). Mover pra uma etapa com `is_lost` pede o motivo por um `window.prompt` nativo
+  (`gloo_dialogs::prompt`) antes de chamar a API — sem isso a API devolve
+  `lost_reason_required` e a UI mostraria só o erro cru.
+- **Achado rodando de verdade:** `cargo check` (perfil dev) não pegou um `E0382` de borrow
+  que só aparecia em `cargo build --release`/`dx build` — o `for lead in leads { LeadCard {
+  key: "{lead.id}", lead, ... } }` movia `lead` antes do `rsx!` terminar de montar a `key` no
+  código gerado pelo perfil de release. **Pra este crate, `cargo check` sozinho não basta:
+  rode `cargo build --release` (ou `dx build`) antes de confiar que compila.** Resolvido
+  extraindo `lead.id.clone()` pra uma variável antes do bloco `rsx!`.
+- Provado com Playwright de verdade: funil padrão com as 5 etapas na ordem certa
+  (Novo/Qualificado/Proposta/Ganho/Perdido), criar lead pela coluna, avançar até "Ganho" e ver
+  a métrica de ganhos subir, mover outro lead pra "Perdido" e confirmar que aparece o prompt
+  pedindo o motivo.
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)
@@ -292,7 +322,9 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   fora do ar mais que os ~50s de retry
 - Alerta quando algo cair na `crm-inbound-dlq`
 - Detecção de opt-out ("parar", "sair") marcando `is_blocked`
-- Interface: só login + caixa de entrada. Faltam pipeline/kanban, contatos e cadastro de
-  número de WhatsApp pela tela (hoje só por API)
+- Interface: login, caixa de entrada e kanban/métricas. Faltam contatos e cadastro de número
+  de WhatsApp pela tela (hoje só por API), e edição/detalhe de lead (título, valor, descrição
+  só dão pra mudar pela API)
+- Kanban sem arraste (só os botões ◀/▶) e sem reordenar dentro da mesma coluna
 - Seletor de tenant na interface (hoje sempre abre no primeiro tenant do usuário)
 - Paginação na lista de conversas e no scroll da thread (hoje só a primeira página)

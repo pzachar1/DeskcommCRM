@@ -1,34 +1,11 @@
 use dioxus::prelude::*;
 
 use crate::api::{self, InboxItem, Message};
-use crate::app::{Route, Session, SessionSignal};
+use crate::app::use_session_gate;
 
 #[component]
 pub fn Inbox() -> Element {
-    let mut session = use_context::<SessionSignal>();
-    let nav = use_navigator();
-
-    // Recarregar a página perde o Signal (a sessão vive no cookie HttpOnly),
-    // então toda entrada em "/" tenta reconstruir a sessão a partir dele.
-    use_effect(move || {
-        if session.read().is_none() {
-            spawn(async move {
-                match api::me().await {
-                    Ok(me) => match me.tenants.first() {
-                        Some(m) => session.set(Some(Session { user: me.user, tenant_id: m.tenant_id.clone() })),
-                        None => {
-                            nav.push(Route::Login {});
-                        }
-                    },
-                    Err(_) => {
-                        nav.push(Route::Login {});
-                    }
-                }
-            });
-        }
-    });
-
-    let Some(current) = session() else {
+    let Some(current) = use_session_gate() else {
         return rsx! {
             div { class: "loading", "Carregando..." }
         };
@@ -60,17 +37,6 @@ pub fn Inbox() -> Element {
             }
         }
     });
-
-    let do_logout = {
-        let mut session = session;
-        move |_| {
-            spawn(async move {
-                let _ = api::logout().await;
-                session.set(None);
-                nav.push(Route::Login {});
-            });
-        }
-    };
 
     let open_conversation = move |item: InboxItem| {
         let tenant_id = tenant_id.clone();
@@ -108,10 +74,6 @@ pub fn Inbox() -> Element {
     rsx! {
         div { class: "inbox",
             aside { class: "conversation-list",
-                header {
-                    span { "{current.user.name.clone().unwrap_or(current.user.email.clone())}" }
-                    button { class: "link-button", onclick: do_logout, "sair" }
-                }
                 match &*conversations.read() {
                     Some(Ok(page)) if page.items.is_empty() => rsx! {
                         p { class: "empty", "nenhuma conversa ainda" }
