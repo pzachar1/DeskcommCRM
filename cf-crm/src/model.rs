@@ -131,6 +131,26 @@ text_enum!(LinkTargetKind {
     External => "external",
 });
 
+text_enum!(
+    /// Quem gera a resposta do agente. A URL, a chave e o formato do corpo são
+    /// do Worker (`worker/src/agent.rs`); aqui é só a escolha do tenant.
+    AgentProvider {
+        Anthropic => "anthropic",
+        WorkersAi => "workers_ai",
+    }
+);
+
+text_enum!(
+    /// Em que a rodada do agente deu. `Skipped` é decisão de não responder (com
+    /// motivo), não erro: conversa em mão humana, janela fechada, agente desligado.
+    AgentOutcomeKind {
+        Replied => "replied",
+        Handoff => "handoff",
+        Skipped => "skipped",
+        Failed => "failed",
+    }
+);
+
 text_enum!(OutboxKind {
     SendMessage => "send_message",
     SyncTemplates => "sync_templates",
@@ -365,4 +385,96 @@ pub struct OutboxItem {
     /// Envio em andamento desde este instante (migration 0002).
     #[serde(default)]
     pub in_flight_at: Option<i64>,
+}
+
+/// Config do agente DESTE tenant (uma linha, `id = 'default'`). Linha ausente =
+/// o que [`Default`] diz, e o padrão é DESLIGADO: instalação nova não começa
+/// respondendo em nome de ninguém.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    #[serde(deserialize_with = "crate::dbfmt::bool_int")]
+    pub is_enabled: bool,
+    pub provider: AgentProvider,
+    pub model: String,
+    pub system_prompt: String,
+    pub max_output_tokens: i64,
+    pub temperature: f64,
+    pub history_limit: i64,
+    pub debounce_ms: i64,
+    pub human_silence_ms: i64,
+    pub max_replies_per_hour: i64,
+    /// Frases do contato que mandam a conversa para humano sem gastar modelo.
+    #[serde(deserialize_with = "crate::dbfmt::json_text")]
+    pub handoff_keywords: Value,
+    pub updated_by: Option<String>,
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        AgentConfig {
+            is_enabled: false,
+            provider: AgentProvider::Anthropic,
+            model: "claude-sonnet-5".into(),
+            system_prompt: String::new(),
+            max_output_tokens: 400,
+            temperature: 0.3,
+            history_limit: 20,
+            debounce_ms: 8_000,
+            human_silence_ms: 4 * 60 * 60 * 1000,
+            max_replies_per_hour: 12,
+            handoff_keywords: Value::Array(Vec::new()),
+            updated_by: None,
+            updated_at: 0,
+        }
+    }
+}
+
+impl AgentConfig {
+    /// As frases de handoff em minúsculas, já sem vazio. Valor fora de formato
+    /// (não é lista de texto) vira lista vazia em vez de derrubar a rodada.
+    pub fn handoff_phrases(&self) -> Vec<String> {
+        self.handoff_keywords
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Conversa devendo resposta. Uma linha por conversa: mensagem nova durante a
+/// espera empurra `run_after` em vez de criar outra rodada.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentJobRow {
+    pub conversation_id: String,
+    pub trigger_message_id: String,
+    pub run_after: i64,
+    pub attempts: i64,
+    pub in_flight_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Uma rodada do agente, inclusive a que decidiu ficar calada.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRun {
+    pub id: String,
+    pub conversation_id: String,
+    pub trigger_message_id: Option<String>,
+    pub reply_message_id: Option<String>,
+    pub outcome: AgentOutcomeKind,
+    pub reason: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub tokens_in: Option<i64>,
+    pub tokens_out: Option<i64>,
+    pub latency_ms: Option<i64>,
+    pub created_at: i64,
 }

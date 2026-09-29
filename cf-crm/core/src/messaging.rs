@@ -252,7 +252,17 @@ pub struct Sent {
     pub created: bool,
 }
 
+/// Envio de quem está na tela (ou do sistema, quando não há ator). O agente
+/// entra pelo [`send_as`] com `sent_via = 'ai'` — mesma cadeia, mesma garantia.
 pub fn send<D: Db>(ctx: &Ctx<D>, conversation_id: &str, out: Outgoing, idempotency_key: Option<&str>) -> Result<Sent> {
+    let via = if ctx.actor.is_some() { SentVia::Crm } else { SentVia::System };
+    send_as(ctx, conversation_id, out, idempotency_key, via)
+}
+
+/// Igual ao [`send`], dizendo QUEM está mandando. Existe para o agente: a
+/// resposta automática é uma mensagem como qualquer outra (linha em `messages`,
+/// linha em `outbox`, envio pelo Alarm), e a única diferença é o `sent_via`.
+pub fn send_as<D: Db>(ctx: &Ctx<D>, conversation_id: &str, out: Outgoing, idempotency_key: Option<&str>, via: SentVia) -> Result<Sent> {
     let key = idempotency_key.map(str::trim).filter(|k| !k.is_empty());
     if let Some(k) = key {
         if k.len() > 200 {
@@ -315,7 +325,7 @@ pub fn send<D: Db>(ctx: &Ctx<D>, conversation_id: &str, out: Outgoing, idempoten
         }
 
         let id = ctx.new_id();
-        let sent_via = if ctx.actor.is_some() { SentVia::Crm } else { SentVia::System };
+        let sent_via = via;
         exec(
             ctx.db,
             "INSERT INTO messages (id, conversation_id, contact_id, idempotency_key, direction, type, status, body,
@@ -354,6 +364,11 @@ pub fn send<D: Db>(ctx: &Ctx<D>, conversation_id: &str, out: Outgoing, idempoten
              WHERE id = ?3",
             &[json!(ctx.now_ms), json!(preview(shown, kind)), json!(conv.id)],
         )?;
+        // Atendente respondeu: o agente cala nesta conversa pelo tempo
+        // configurado. Sem isto, o robô fala em cima de quem está atendendo.
+        if sent_via == SentVia::Crm {
+            crate::agent::silence_for_human(ctx, &conv.id)?;
+        }
         Ok(Sent { message: get_message(ctx, &id)?, created: true })
     })
 }

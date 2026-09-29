@@ -7,8 +7,8 @@ Esta pasta é independente do resto do repositório e foi feita pra virar um rep
 | Crate | Pasta | O que tem |
 |---|---|---|
 | `crm-schema` | `.` | migrations (D1 e DO), structs do modelo, contrato do webhook do Kapso |
-| `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline, conversas, entrada e envio de WhatsApp. Sem runtime: o banco entra por um trait |
-| `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel, webhook do Kapso, consumer da Queue) + Durable Object por tenant |
+| `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline, conversas, entrada e envio de WhatsApp, e a decisão do agente. Sem runtime: o banco entra por um trait |
+| `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel, webhook do Kapso, consumer da Queue) + Durable Object por tenant, que fala com o Kapso e com o modelo |
 
 ```bash
 cargo test                                                 # schema + core, SQLite de verdade no host
@@ -25,10 +25,13 @@ ALLOW_SIGNUP="true"
 KAPSO_API_BASE="http://127.0.0.1:8799"
 KAPSO_API_KEY="chave-de-teste"
 KAPSO_WEBHOOK_SECRET="segredo-de-teste"
+ANTHROPIC_API_BASE="http://127.0.0.1:8798"
+ANTHROPIC_API_KEY="chave-do-modelo"
 VARS
 npx wrangler dev --port 8787
 python3 e2e/smoke.py http://127.0.0.1:8787      # fase 2: 34 verificações pela API
 python3 e2e/whatsapp.py http://127.0.0.1:8787   # fase 3: 36 verificações, com um Kapso falso na porta 8799
+python3 e2e/agente.py http://127.0.0.1:8787     # fase 4: Kapso falso (8799) + modelo falso (8798)
 ```
 
 ### Subir em produção
@@ -41,6 +44,7 @@ npx wrangler queues create crm-inbound
 npx wrangler queues create crm-inbound-dlq
 npx wrangler secret put KAPSO_API_KEY
 npx wrangler secret put KAPSO_WEBHOOK_SECRET
+npx wrangler secret put ANTHROPIC_API_KEY      # ou WORKERS_AI_TOKEN, se o agente for pelo Workers AI
 npx wrangler deploy
 ```
 
@@ -54,7 +58,7 @@ não cadastrado é descartado com aviso no log.
 | Banco | Arquivo | Conteúdo |
 |---|---|---|
 | D1 global | `migrations/global/` | tenants, users, memberships, sessions, api_tokens, whatsapp_numbers |
-| SQLite do DO, um por tenant | `migrations/tenant/` | contacts, tags, pipelines, stages, leads, lead_activities, lead_links, conversations, messages, wa_templates, webhook_receipts, outbox |
+| SQLite do DO, um por tenant | `migrations/tenant/` | contacts, tags, pipelines, stages, leads, lead_activities, lead_links, conversations, messages, wa_templates, webhook_receipts, outbox, agent_config, agent_jobs, agent_runs |
 
 O D1 guarda o que precisa ser consultado acima de um tenant: login, permissão e
 de qual tenant é cada número de WhatsApp. O resto fica no DO do tenant
@@ -92,6 +96,10 @@ entrada: Kapso ─webhook─> Worker
          Queue ─> DO do tenant
            INSERT webhook_receipts (X-Idempotency-Key) ON CONFLICT DO NOTHING -> se já existia, para
            INSERT messages ... ON CONFLICT (external_id) DO NOTHING
+
+agente:  a mesma transação da entrada grava UMA linha em agent_jobs (PK = conversa)
+         Alarm: claim_due -> POST no provedor (Anthropic ou Workers AI) -> complete
+         └─> a resposta entra como messages(queued) + outbox, chave agent:<id da entrada>
 
 saída:   DO grava messages(queued) + outbox, na mesma transação, e agenda o Alarm
          Alarm: marca in_flight -> POST {KAPSO_API_BASE}/{phone_number_id}/messages
@@ -171,6 +179,10 @@ o que barra POST de formulário vindo de outro site.
 | `GET /api/v1/conversations/{id}/messages?limit=&cursor=` | viewer |
 | `POST /api/v1/conversations/{id}/messages` `{ type: "text", body }` ou `{ type: "template", name, language, components? }` | agent |
 | `POST /api/v1/conversations/{id}/read` | agent |
+| `POST /api/v1/conversations/{id}/handoff` `{ reason? }` (tira do agente) | agent |
+| `POST /api/v1/conversations/{id}/ai` (devolve ao agente) | agent |
+| `GET /api/v1/agent`, `PUT /api/v1/agent` | viewer / manager |
+| `GET /api/v1/agent/runs?limit=&cursor=` | viewer |
 | `POST /webhooks/kapso` | assinatura HMAC |
 
 Conta nova já nasce com o funil "Vendas" (novo → qualificado → proposta → ganho / perdido).
@@ -228,6 +240,63 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   `tests/fixtures/kapso/`) e no `wrangler dev` com D1, DO, Queue e Alarm locais contra um
   servidor HTTP que faz o papel do Kapso (`e2e/whatsapp.py`).
 
+## Como a fase 4 funciona por dentro (o agente responde sozinho)
+
+Ligar fica em `PUT /api/v1/agent` (papel manager): `is_enabled`, `provider`
+(`anthropic` ou `workers_ai`), `model`, `system_prompt`, `debounce_ms`,
+`human_silence_ms`, `max_replies_per_hour`, `handoff_keywords`. Nasce
+**desligado**, e ligar sem prompt é recusado (`agent_prompt_required`) — agente
+sem instrução responde em nome da empresa sem saber nada dela.
+
+- **A resposta do agente não tem caminho próprio de envio.** Ela entra por
+  `messaging::send_as` com `sent_via = 'ai'`: mesma linha em `messages`, mesma
+  linha em `outbox`, mesmo Alarm, mesma garantia de sair no máximo uma vez. A
+  chave de idempotência é `agent:<id da mensagem do contato>`, e é ela que segura
+  o pior caso: o DO cair depois de gravar a resposta e antes de apagar o job. Na
+  rodada seguinte o `uq_messages_idempotency` devolve a mesma mensagem.
+- **Uma rodada por conversa.** `agent_jobs` tem a conversa como chave primária.
+  Quem escreve "oi", "boa tarde", "queria saber o preço" em três mensagens recebe
+  UMA resposta: as seguintes empurram `run_after` (o `debounce_ms`) em vez de
+  criar outra rodada.
+- **A barreira é conferida duas vezes**: ao agendar e ao entregar a rodada.
+  Durante a espera um atendente pode ter entrado na conversa, e robô falando em
+  cima de gente é pior que robô devagar.
+- **Quem cala o agente:** atendente respondeu pela tela (`sent_via = 'crm'`) ou
+  pelo app do WhatsApp (`origin = business_app`) → `bot_silenced_until` e
+  `status = 'human'`; contato com `force_human`; conversa com `snooze_until`;
+  janela de 24h fechada; contato bloqueado ou anonimizado. Cada recusa vira linha
+  em `agent_runs` com o motivo — **menos "agente desligado"**, que não gera log
+  nenhum: uma linha por mensagem recebida encheria a tabela em toda instalação
+  que não usa agente.
+- **Os dois sentidos.** `POST /conversations/{id}/handoff` tira do agente;
+  `POST /conversations/{id}/ai` devolve. Sem o segundo, conversa que foi para
+  humano nunca voltaria.
+- **Pedido de saída é da INGESTÃO, não do agente.** `lib/opt_out` decide, e vale
+  com o agente desligado: palavra ISOLADA ("STOP", "sair", "baja") ou verbo de
+  cessação com objeto de comunicação ("parar de me mandar", "no quiero recibir
+  mas mensajes"). Nunca a palavra solta no meio da frase — a regra do Deskcomm
+  que fazia isso bloqueou paciente que perguntou "tem como parar a dor?". O
+  inequívoco grava `is_blocked` e **apaga a rodada que estava na fila**; o
+  ambíguo ("me deixa em paz") só chama humano, porque quem silencia alguém para
+  sempre é uma pessoa.
+- **Nada morre calado.** Erro do provedor que passa sozinho (429, 5xx, rede,
+  `overloaded_error`) tenta de novo em 30s, 1, 2 e 4 min; na quarta desiste e a
+  conversa vai para **humano** (`agent_failed`). Resposta vazia, marcador
+  `[HUMANO]` na resposta do modelo e teto de respostas por hora estourado (sinal
+  de laço com outro robô) terminam do mesmo jeito: alguém olha.
+- **Só responde o que dá para ler.** Foto, figurinha e áudio sem transcrição
+  ficam na caixa de entrada com o contador de não lidas chamando gente
+  (`unsupported_inbound_type`).
+- **Onde falar** sai do ambiente, nunca do banco: com `AI_GATEWAY_ACCOUNT_ID` +
+  `AI_GATEWAY_NAME`, os dois provedores passam pelo **AI Gateway** (cache, log e
+  teto de gasto); sem eles, direto no provedor; `ANTHROPIC_API_BASE` /
+  `WORKERS_AI_API_BASE` mandam quando existem (é como o `e2e/agente.py` aponta
+  para o modelo falso). Falta de chave não é erro de rede: é recusa permanente
+  `model_not_configured`, e a conversa vai para humano em vez de ficar tentando.
+- Provado no host (22 testes da decisão do agente, mais 5 da regra de opt-out e 4
+  do schema das três tabelas) e no `wrangler dev` pelo `e2e/agente.py`, com Kapso
+  falso e modelo falso.
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)
@@ -240,5 +309,8 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
 - Reconciliação por Cron Trigger: buscar no Kapso as mensagens recentes quando o webhook ficar
   fora do ar mais que os ~50s de retry
 - Alerta quando algo cair na `crm-inbound-dlq`
-- Detecção de opt-out ("parar", "sair") marcando `is_blocked`
+- Base de conhecimento do agente (RAG): hoje o que ele sabe é o `system_prompt` e a conversa
+- Ferramenta na mão do agente (consultar agenda, criar lead, mover o funil): ele só escreve texto
+- Agente lendo mídia: foto e áudio ficam para humano
+- Conta de custo por tenant além do log por rodada (`agent_runs` tem token e latência; ninguém soma)
 - Interface em Dioxus

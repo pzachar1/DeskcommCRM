@@ -41,6 +41,11 @@ pub const TENANT_MIGRATIONS: &[Migration] = &[
         name: "outbox_in_flight",
         sql: include_str!("../migrations/tenant/0002_outbox_in_flight.sql"),
     },
+    Migration {
+        version: 3,
+        name: "agent",
+        sql: include_str!("../migrations/tenant/0003_agent.sql"),
+    },
 ];
 
 /// Janela de atendimento da Meta: 24h desde a última mensagem do contato.

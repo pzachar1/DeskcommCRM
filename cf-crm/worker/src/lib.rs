@@ -1,6 +1,7 @@
 //! Worker de entrada. Autentica no D1, resolve o tenant, confere o papel e repassa
 //! para o Durable Object do tenant. Não guarda dado de negócio.
 
+mod agent;
 mod auth;
 mod http;
 mod ids;
@@ -73,6 +74,9 @@ fn required_role(method: &Method, path: &str) -> Role {
     match method {
         Method::Get | Method::Head => Role::Viewer,
         _ if path.starts_with("/api/v1/whatsapp-numbers") => Role::Admin,
+        // ligar o agente, trocar o prompt ou o modelo é decisão de quem
+        // responde pelo atendimento, não de quem atende
+        _ if path.starts_with("/api/v1/agent") => Role::Manager,
         _ if path.starts_with("/api/v1/pipelines") => Role::Manager,
         _ => Role::Agent,
     }

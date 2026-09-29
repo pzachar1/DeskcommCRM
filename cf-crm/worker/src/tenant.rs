@@ -4,6 +4,7 @@
 
 use crate::http::{fail, from_core, json_body, ok};
 use crate::ids::{now_ms, uuid_v7};
+use crm_core::agent::{self as agente, ConfigPatch};
 use crm_core::contacts::{self, ContactPatch, NewContact};
 use crm_core::inbox;
 use crm_core::messaging::{self, OpenConversation, Outgoing};
@@ -34,6 +35,9 @@ pub const INTERNAL_HEADER: &str = "X-Internal-Caller";
 const KAPSO_API_BASE: &str = "https://api.kapso.ai/meta/whatsapp/v24.0";
 /// Envios por rodada do Alarm; se sobrar, o Alarm roda de novo na hora.
 const SENDS_PER_ROUND: u32 = 20;
+/// Respostas do agente por rodada. Bem menor que o envio: cada uma é uma
+/// chamada a modelo, que custa tempo de parede e token.
+const REPLIES_PER_ROUND: u32 = 5;
 const KAPSO_TIMEOUT_MS: u32 = 30_000;
 
 // ------------------------------------------------------------------ Db sobre o SQLite do DO
@@ -181,6 +185,10 @@ impl DurableObject for TenantDo {
         if self.init.is_err() {
             return Response::empty();
         }
+        // 1. o agente decide o que responder. A resposta entra como mensagem
+        //    'queued' + linha na outbox, então o passo 2 já a leva embora.
+        self.drain_agent().await?;
+
         let api_key = self.env.secret("KAPSO_API_KEY").map(|s| s.to_string()).ok();
         let base = self.env.var("KAPSO_API_BASE").map(|v| v.to_string()).unwrap_or_else(|_| KAPSO_API_BASE.to_string());
         let base = base.trim_end_matches('/').to_string();
@@ -219,12 +227,43 @@ fn core_err(e: CoreError) -> worker::Error {
 }
 
 impl TenantDo {
-    /// Agenda o Alarm pro próximo envio devido (ou pro fim do prazo de um envio
-    /// em andamento). Sem nada na outbox, não agenda.
+    /// Uma rodada do agente por conversa devida: monta o prompt, chama o modelo,
+    /// grava o resultado. A chamada de rede acontece FORA da transação — quem
+    /// entrega o trabalho pronto é `claim_due`, quem o arquiva é `complete`.
+    async fn drain_agent(&self) -> Result<()> {
+        let providers = crate::agent::Providers::from_env(&self.env);
+        loop {
+            let now = now_ms();
+            let ids = move || uuid_v7(now);
+            let jobs = agente::claim_due(&Ctx::new(&self.db, now, None, &ids), REPLIES_PER_ROUND).map_err(core_err)?;
+            if jobs.is_empty() {
+                return Ok(());
+            }
+            let cheio = jobs.len() as u32 == REPLIES_PER_ROUND;
+            for job in jobs {
+                let gerado = crate::agent::generate(&providers, &job).await;
+                let done = now_ms();
+                let ids = move || uuid_v7(done);
+                agente::complete(&Ctx::new(&self.db, done, None, &ids), &job, &gerado).map_err(core_err)?;
+            }
+            if !cheio {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Agenda o Alarm pro próximo trabalho devido: envio na outbox, fim do prazo
+    /// de um envio em andamento, ou resposta do agente esperando o debounce.
+    /// Sem nada pendente, não agenda.
     async fn wake(&self) -> Result<()> {
         let now = now_ms();
         let ids = move || uuid_v7(now);
-        let Some(at) = outbox::next_wake_at(&Ctx::new(&self.db, now, None, &ids)).map_err(core_err)? else {
+        let ctx = Ctx::new(&self.db, now, None, &ids);
+        let proximo = [outbox::next_wake_at(&ctx).map_err(core_err)?, agente::next_wake_at(&ctx).map_err(core_err)?]
+            .into_iter()
+            .flatten()
+            .min();
+        let Some(at) = proximo else {
             return Ok(());
         };
         let storage = self.state.storage();
@@ -280,6 +319,12 @@ macro_rules! body {
 #[derive(Deserialize)]
 struct Note {
     body: String,
+}
+
+#[derive(Deserialize)]
+struct HandoffBody {
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -370,6 +415,20 @@ async fn route(ctx: &Ctx<'_, DoDb>, mut req: Request) -> Result<Response> {
             }
         }
         (Method::Post, ["conversations", id, "read"]) => reply(messaging::mark_read(ctx, id), 200),
+        // Os dois sentidos do atendimento: tirar do agente e devolver a ele.
+        (Method::Post, ["conversations", id, "handoff"]) => {
+            let input: HandoffBody = body!(req);
+            let reason = input.reason.as_deref().map(str::trim).filter(|r| !r.is_empty()).unwrap_or("pedido_do_atendente");
+            reply(agente::handoff(ctx, id, reason), 200)
+        }
+        (Method::Post, ["conversations", id, "ai"]) => reply(agente::back_to_ai(ctx, id), 200),
+
+        (Method::Get, ["agent"]) => reply(agente::config(ctx), 200),
+        (Method::Put, ["agent"]) => {
+            let input: ConfigPatch = body!(req);
+            reply(agente::save_config(ctx, input), 200)
+        }
+        (Method::Get, ["agent", "runs"]) => reply(agente::list_runs(ctx, limit, q("cursor").as_deref()), 200),
 
         _ => fail(404, "route_not_found", "rota não existe"),
     }

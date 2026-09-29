@@ -279,3 +279,74 @@ fn service_window_is_24h() {
     assert!(!service_window_open(Some(T), T + SERVICE_WINDOW_MS));
     assert!(!service_window_open(None, T));
 }
+
+// ---------------------------------------------------------------- agente (0003)
+
+#[test]
+fn uma_rodada_por_conversa() {
+    let db = seeded();
+    insert_inbound(&db, "m1", "wamid.1");
+    insert_inbound(&db, "m2", "wamid.2");
+    let job = |id: &str, msg: &str| {
+        db.execute(
+            "INSERT INTO agent_jobs (conversation_id, trigger_message_id, run_after, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3, ?3)",
+            params![id, msg, T],
+        )
+    };
+    assert!(job("cv1", "m1").is_ok());
+    // a segunda mensagem não abre outra rodada: a chave primária é a conversa,
+    // e o caminho normal é o upsert que empurra `run_after`
+    assert!(job("cv1", "m2").is_err(), "duas rodadas na mesma conversa");
+}
+
+#[test]
+fn log_de_resposta_exige_a_mensagem_enviada() {
+    let db = seeded();
+    insert_inbound(&db, "m1", "wamid.1");
+    let run = |outcome: &str, reply: Option<&str>| {
+        db.execute(
+            "INSERT INTO agent_runs (id, conversation_id, trigger_message_id, reply_message_id, outcome, created_at)
+             VALUES (?1, 'cv1', 'm1', ?2, ?3, ?4)",
+            params![format!("r-{outcome}-{}", reply.unwrap_or("nada")), reply, outcome, T],
+        )
+    };
+    // 'replied' sem mensagem seria log de uma resposta que ninguém recebeu
+    assert!(run("replied", None).is_err());
+    assert!(run("skipped", None).is_ok());
+    assert!(run("handoff", None).is_ok());
+    assert!(run("failed", None).is_ok());
+    assert!(run("respondeu", None).is_err(), "vocabulário fechado por CHECK");
+}
+
+#[test]
+fn config_do_agente_e_uma_linha_so() {
+    let db = tenant_db();
+    let cfg = |id: &str| {
+        db.execute(
+            "INSERT INTO agent_config (id, system_prompt, updated_at) VALUES (?1, 'seja breve', ?2)",
+            params![id, T],
+        )
+    };
+    assert!(cfg("default").is_ok());
+    assert!(cfg("outra").is_err(), "config é do tenant, e o tenant é este banco");
+    assert!(cfg("default").is_err(), "sem segunda linha nem com a mesma chave");
+    // e os padrões vêm do schema, desligado
+    let ligado: i64 = db.query_row("SELECT is_enabled FROM agent_config", [], |r| r.get(0)).unwrap();
+    assert_eq!(ligado, 0);
+}
+
+#[test]
+fn rodada_do_agente_some_com_a_conversa() {
+    let db = seeded();
+    insert_inbound(&db, "m1", "wamid.1");
+    db.execute(
+        "INSERT INTO agent_jobs (conversation_id, trigger_message_id, run_after, created_at, updated_at)
+         VALUES ('cv1', 'm1', ?1, ?1, ?1)",
+        params![T],
+    )
+    .unwrap();
+    db.execute("DELETE FROM messages WHERE id = 'm1'", []).unwrap();
+    let restou: i64 = db.query_row("SELECT COUNT(*) FROM agent_jobs", [], |r| r.get(0)).unwrap();
+    assert_eq!(restou, 0, "rodada apontando para mensagem que não existe mais");
+}
