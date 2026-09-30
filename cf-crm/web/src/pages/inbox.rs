@@ -122,7 +122,7 @@ pub fn Inbox() -> Element {
     };
 
     rsx! {
-        div { class: "inbox",
+        div { class: if selected().is_some() { "inbox has-thread" } else { "inbox" },
             aside { class: "conversation-list",
                 match &*conversations.read() {
                     Some(Ok(page)) if page.items.is_empty() => rsx! {
@@ -143,6 +143,7 @@ pub fn Inbox() -> Element {
             }
             main { class: "thread",
                 if let Some(conv_id) = selected() {
+                    button { class: "link-button back-button", onclick: move |_| selected.set(None), "← conversas" }
                     div { class: "thread-messages",
                         match &*messages.read() {
                             Some(Some(Ok(page))) => rsx! {

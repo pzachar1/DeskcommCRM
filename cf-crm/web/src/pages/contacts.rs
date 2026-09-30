@@ -151,25 +151,27 @@ pub fn Contacts() -> Element {
                     p { class: "empty", "nenhum contato" }
                 },
                 Some(Ok(page)) => rsx! {
-                    table { class: "table",
-                        thead {
-                            tr {
-                                th { "Nome" }
-                                th { "Telefone" }
-                                th { "E-mail" }
-                                th {}
+                    div { class: "table-wrap",
+                        table { class: "table",
+                            thead {
+                                tr {
+                                    th { "Nome" }
+                                    th { "Telefone" }
+                                    th { "E-mail" }
+                                    th {}
+                                }
                             }
-                        }
-                        tbody {
-                            for c in page.items.iter().cloned() {
-                                {
-                                    let cid = c.id.clone();
-                                    rsx! {
-                                        ContactRow {
-                                            key: "{cid}",
-                                            contact: c,
-                                            can_chat: sender().is_some(),
-                                            on_chat: move |id| chat(id),
+                            tbody {
+                                for c in page.items.iter().cloned() {
+                                    {
+                                        let cid = c.id.clone();
+                                        rsx! {
+                                            ContactRow {
+                                                key: "{cid}",
+                                                contact: c,
+                                                can_chat: sender().is_some(),
+                                                on_chat: move |id| chat(id),
+                                            }
                                         }
                                     }
                                 }

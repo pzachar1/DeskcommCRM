@@ -114,7 +114,7 @@ fn Shell() -> Element {
                 }
                 span { class: "shell-user",
                     if let Some(s) = session() {
-                        "{s.user.name.clone().unwrap_or(s.user.email.clone())}"
+                        span { class: "shell-name", "{s.user.name.clone().unwrap_or(s.user.email.clone())}" }
                     }
                     button { class: "link-button", onclick: do_logout, "sair" }
                 }

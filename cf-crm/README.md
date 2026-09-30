@@ -339,6 +339,25 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
 - Provado com Playwright (14 verificações): erro de telefone sem DDI, E.164, Enter salva, busca,
   `phone_number_id` inválido, número repetido (409) e recarregar a página mantendo a sessão.
 
+## Tamanhos de tela
+
+Medido por `getBoundingClientRect` (não a olho) em 2560×1440, 1920×1080, 1366×768, 1024×768,
+768×1024 e 390×844, com dados de volume (40 contatos, 24 leads, 12 conversas com mensagem
+longa e URL sem espaço). Nenhuma tela estoura a largura da janela em nenhum tamanho.
+
+- **Telas grandes:** lista de conversas cresce com a janela (`clamp(280px, 22vw, 420px)`), bolha
+  de mensagem para em 680px (linha de 150 caracteres não se lê), colunas do kanban esticam até
+  380px, e Contatos/WhatsApp ficam num miolo de 1400px centralizado.
+- **Bug achado:** texto sem espaço (URL) numa bolha alargava a thread além da janela e empurrava
+  a lista de conversas pra fora da tela abaixo de ~1100px. Corrigido com `min-width: 0` na
+  thread e `overflow-wrap: anywhere` na bolha. Nome comprido também passava por baixo do
+  contador de não lidas; agora corta com reticências.
+- **Até 800px** (tablet/celular): a caixa de entrada mostra a lista OU a conversa, com o botão
+  "← conversas"; tabelas rolam na horizontal dentro da própria caixa; o menu do topo rola de
+  lado. A partir de 801px é o layout de sempre.
+- Sem meta `viewport` no `index.html`? O `dx` já gera. Tela de celular real (toque, teclado
+  virtual) não foi testada, só janela de 390px no Chromium.
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)

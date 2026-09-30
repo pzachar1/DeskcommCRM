@@ -66,22 +66,24 @@ pub fn Whatsapp() -> Element {
                     p { class: "empty", "nenhum número cadastrado" }
                 },
                 Some(Ok(list)) => rsx! {
-                    table { class: "table",
-                        thead {
-                            tr {
-                                th { "Número" }
-                                th { "Apelido" }
-                                th { "phone_number_id" }
-                                th { "Status" }
+                    div { class: "table-wrap",
+                        table { class: "table",
+                            thead {
+                                tr {
+                                    th { "Número" }
+                                    th { "Apelido" }
+                                    th { "phone_number_id" }
+                                    th { "Status" }
+                                }
                             }
-                        }
-                        tbody {
-                            for n in list.iter().cloned() {
-                                tr { key: "{n.phone_number_id}",
-                                    td { "{n.display_phone}" }
-                                    td { "{n.label.clone().unwrap_or_else(|| \"—\".to_string())}" }
-                                    td { code { "{n.phone_number_id}" } }
-                                    td { "{n.status}" }
+                            tbody {
+                                for n in list.iter().cloned() {
+                                    tr { key: "{n.phone_number_id}",
+                                        td { "{n.display_phone}" }
+                                        td { "{n.label.clone().unwrap_or_else(|| \"—\".to_string())}" }
+                                        td { code { "{n.phone_number_id}" } }
+                                        td { "{n.status}" }
+                                    }
                                 }
                             }
                         }

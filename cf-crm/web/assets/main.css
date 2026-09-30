@@ -91,3 +91,35 @@ button { cursor: pointer; }
 .template-form textarea { flex: 1 1 100%; min-height: 3.5rem; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
 .tpl-toggle { padding: 0 1rem 0.75rem; text-align: left; font-size: 0.8rem; }
 .bubble-template { font-style: italic; opacity: 0.9; }
+
+/* --- telas grandes --- */
+.conversation-list { width: clamp(280px, 22vw, 420px); flex: 0 0 auto; }
+.conversation-row { padding-right: 3rem; }
+.conversation-row-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thread { min-width: 0; }
+.bubble { max-width: min(70%, 680px); overflow-wrap: anywhere; }
+.board .column { flex: 1 0 260px; max-width: 380px; }
+.page { max-width: 1400px; width: 100%; margin: 0 auto; }
+.table-wrap { overflow-x: auto; }
+.table td { overflow-wrap: anywhere; }
+.back-button { display: none; text-align: left; padding: 0.6rem 1rem; border-bottom: 1px solid #e0e0e0; background: #fff; }
+.shell-name { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics { flex-wrap: wrap; }
+.page-header { flex-wrap: wrap; }
+.search { max-width: 100%; }
+.login-form { width: min(320px, 90vw); }
+
+/* --- tablet e celular --- */
+@media (max-width: 800px) {
+  .shell-header { flex-wrap: wrap; gap: 0.25rem; padding: 0.4rem 0.75rem; }
+  .shell-nav { overflow-x: auto; max-width: 100%; }
+  .shell-link { white-space: nowrap; }
+  .conversation-list { width: 100%; border-right: none; }
+  .inbox.has-thread .conversation-list { display: none; }
+  .inbox:not(.has-thread) .thread { display: none; }
+  .back-button { display: block; }
+  .bubble { max-width: 85%; }
+  .page, .dashboard { padding: 0.75rem; }
+  .search { width: 100%; }
+  .column { flex-basis: 240px; }
+}
