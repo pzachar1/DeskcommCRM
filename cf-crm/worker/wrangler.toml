@@ -5,6 +5,21 @@ compatibility_date = "2025-06-01"
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 
+# Interface (Dioxus/WASM) buildada por `dx build --release` em ../web e servida
+# como assets estáticos, na MESMA origem do Worker — o cookie de sessão é
+# HttpOnly+Secure+SameSite=Strict e não atravessaria uma origem separada
+# (ex.: Cloudflare Pages). `run_worker_first` garante que essas rotas continuam
+# caindo no Worker mesmo com o binding de assets presente.
+[assets]
+directory = "../web/target/dx/crm-web/release/web/public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# "/internal/*" não tem rota pública (só o Worker chama o DO por bind direto,
+# nunca por HTTP de fora) — mas precisa continuar caindo no `handle()` do
+# Worker pra devolver 404 JSON, e não no fallback de SPA dos assets (que
+# responde 405 sem corpo pra método não-GET em path desconhecido).
+run_worker_first = ["/api/*", "/webhooks/*", "/health", "/internal/*"]
+
 # Banco global: tenants, usuários, sessões, roteamento de número do WhatsApp.
 [[d1_databases]]
 binding = "DB"

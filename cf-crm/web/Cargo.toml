@@ -1,0 +1,27 @@
+[package]
+name = "crm-web"
+version = "0.1.0"
+edition = "2021"
+description = "Interface web (Dioxus) do CRM, servida junto do Worker (mesma origem, cookie de sessão)"
+license = "MIT"
+
+[dependencies]
+dioxus = { version = "0.6", features = ["web", "router"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+gloo-net = "0.6"
+gloo-dialogs = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

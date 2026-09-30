@@ -1,4 +1,4 @@
-# crm-schema / crm-core / crm-worker
+# crm-schema / crm-core / crm-worker / crm-web
 
 CRM em Rust + Cloudflare, construído a partir do domínio do DeskcommCRM
 (`supabase/baseline.sql`), com WhatsApp pela API oficial via Kapso.
@@ -9,6 +9,7 @@ Esta pasta é independente do resto do repositório e foi feita pra virar um rep
 | `crm-schema` | `.` | migrations (D1 e DO), structs do modelo, contrato do webhook do Kapso |
 | `crm-core` | `core/` | regras de negócio: contatos, funis, leads, kanban, timeline, conversas, entrada e envio de WhatsApp. Sem runtime: o banco entra por um trait |
 | `crm-worker` | `worker/` | Worker de entrada (login, sessão, tenant, papel, webhook do Kapso, consumer da Queue) + Durable Object por tenant |
+| `crm-web` | `web/` | Interface (Dioxus/WASM): login e caixa de entrada do WhatsApp. Fica FORA do workspace (`exclude` no `Cargo.toml` raiz) — Cargo lock próprio, sem disputar versão de `wasm-bindgen` com o worker |
 
 ```bash
 cargo test                                                 # schema + core, SQLite de verdade no host
@@ -31,10 +32,41 @@ python3 e2e/smoke.py http://127.0.0.1:8787      # fase 2: 34 verificações pela
 python3 e2e/whatsapp.py http://127.0.0.1:8787   # fase 3: 36 verificações, com um Kapso falso na porta 8799
 ```
 
+### Rodar a interface (fase 4, Dioxus)
+
+A interface é servida pelo PRÓPRIO Worker como asset estático, na mesma origem —
+o cookie de sessão é `HttpOnly; Secure; SameSite=Strict` e não atravessaria uma
+origem separada (ex.: Cloudflare Pages num subdomínio à parte). `wrangler.toml`
+declara `[assets]` apontando pro build do Dioxus e `run_worker_first` garante
+que `/api/*`, `/webhooks/*`, `/health` e `/internal/*` continuam caindo no
+Worker mesmo com o binding de assets presente.
+
+```bash
+cargo install dioxus-cli --version "^0.6" --locked   # uma vez só
+
+cd web
+dx build --release        # gera web/target/dx/crm-web/release/web/public
+
+cd ../worker
+npx wrangler dev --port 8787
+```
+
+**Sempre que rodar `dx build` de novo, reinicie o `wrangler dev`.** O layout e
+o nome dos arquivos gerados podem mudar de um build pro outro (fingerprint por
+conteúdo, brotli), e o `wrangler dev` local fotografa o diretório de assets só
+na hora que sobe — servindo o build antigo (ou 404/405 do jeito errado) até
+reiniciar.
+
+Sem build nenhum do Dioxus, `/` cai no fallback de SPA e devolve HTML vazio;
+rode `dx build` pelo menos uma vez antes do primeiro `wrangler dev`.
+
 ### Subir em produção
 
 ```bash
-cd worker
+cd web
+dx build --release                          # antes do deploy: gera o build que o [assets] do worker serve
+
+cd ../worker
 npx wrangler d1 create crm                  # e cole o id no wrangler.toml
 npx wrangler d1 migrations apply crm --remote
 npx wrangler queues create crm-inbound
@@ -228,6 +260,104 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   `tests/fixtures/kapso/`) e no `wrangler dev` com D1, DO, Queue e Alarm locais contra um
   servidor HTTP que faz o papel do Kapso (`e2e/whatsapp.py`).
 
+## Como a fase 4 funciona por dentro
+
+- **Login** (`POST /api/v1/auth/login` + `GET /api/v1/me`): a sessão vive só no cookie
+  `HttpOnly`, então o front não guarda token nenhum — todo carregamento de `/` chama
+  `GET /api/v1/me` de novo pra reconstruir o estado (`Signal<Option<Session>>`), e um 401
+  manda pra `/login` via `dioxus-router`.
+- **Caixa de entrada**: lista conversas (`GET /api/v1/conversations`), abre a thread
+  (`GET /api/v1/conversations/{id}/messages`) e marca como lida ao abrir
+  (`POST .../read` — precisa de `Content-Type: application/json` mesmo sem corpo de verdade,
+  senão o proxy do Worker barra com 415 e a chamada falha calada).
+- **Envio**: `POST /api/v1/conversations/{id}/messages` com `{ type: "text", body }`; a
+  confirmação otimista vem da resposta da chamada, não de polling.
+- **Sem `<form>`**: os dois formulários (login e composer) usam `div` + `onclick`/`onkeydown`
+  no lugar de `onsubmit`. Um `<form>` sem `prevent_default` corretamente amarrado recarrega a
+  página de verdade (perde o estado do WASM) — mais simples evitar o elemento inteiro.
+- Provado com Playwright de verdade (Chromium) contra `wrangler dev` + um Kapso falso: login,
+  mensagem entrando pelo webhook aparecendo na tela, badge de não lida sumindo ao abrir, e
+  envio chegando no Kapso falso.
+
+## Como o dashboard (kanban/métricas) funciona por dentro
+
+- **Layout compartilhado.** `Route::Inbox` e `Route::Dashboard` vivem sob `#[layout(Shell)]`
+  no `dioxus-router`; `Shell` é quem desenha a barra de topo (nav + usuário + sair) e o
+  `Outlet::<Route>`. `Login` fica fora do layout — a régua de fechar um `#[layout]` num
+  `Routable` é acumular `#[end_layout]` nos atributos do PRÓXIMO variant, então `Login` tem
+  que vir depois, nunca antes.
+- **Board vem pronto do backend.** `GET /api/v1/pipelines/{id}/board` já devolve
+  `{ pipeline, columns: [{ stage, leads }] }` na ordem certa — o front não recalcula
+  ordenação nem faz join de tabela nenhuma, só desenha.
+- **Métricas são calculadas no cliente, não vêm de endpoint próprio.** Somando
+  `value_cents` e contando `leads` por coluna, separando por `stage.is_won`/`is_lost`. Não
+  existe (ainda) um endpoint de métricas agregadas — se a conta ficar cara com volume real, é
+  candidato a mover pro backend.
+- **Mover de etapa é botão, não arraste.** `◀`/`▶` chamam `POST /api/v1/leads/{id}/move` pra
+  coluna vizinha (sem `prev_lead_id`/`next_lead_id`, então o card entra sempre no fim da
+  coluna). Mover pra uma etapa com `is_lost` pede o motivo por um `window.prompt` nativo
+  (`gloo_dialogs::prompt`) antes de chamar a API — sem isso a API devolve
+  `lost_reason_required` e a UI mostraria só o erro cru.
+- **Achado rodando de verdade:** `cargo check` (perfil dev) não pegou um `E0382` de borrow
+  que só aparecia em `cargo build --release`/`dx build` — o `for lead in leads { LeadCard {
+  key: "{lead.id}", lead, ... } }` movia `lead` antes do `rsx!` terminar de montar a `key` no
+  código gerado pelo perfil de release. **Pra este crate, `cargo check` sozinho não basta:
+  rode `cargo build --release` (ou `dx build`) antes de confiar que compila.** Resolvido
+  extraindo `lead.id.clone()` pra uma variável antes do bloco `rsx!`.
+- Provado com Playwright de verdade: funil padrão com as 5 etapas na ordem certa
+  (Novo/Qualificado/Proposta/Ganho/Perdido), criar lead pela coluna, avançar até "Ganho" e ver
+  a métrica de ganhos subir, mover outro lead pra "Perdido" e confirmar que aparece o prompt
+  pedindo o motivo.
+
+## Contatos e números de WhatsApp pela tela
+
+- **Contatos** (`/contacts`): lista (`GET /api/v1/contacts?q=`, até 100, busca a cada tecla),
+  cria com nome/e-mail/telefone (`POST`). O telefone é normalizado pela API em E.164 e o erro
+  ("informe o DDI") aparece como veio. Bloqueado (opt-out) ganha uma etiqueta.
+- **WhatsApp** (`/whatsapp`): lista e cadastra números (`/api/v1/whatsapp-numbers`). A API só
+  deixa `admin` cadastrar, então `Session` passou a guardar o `role` (vem de `GET /api/v1/me`)
+  e o formulário some pra quem não é admin. Mostra onde apontar o webhook no Kapso.
+- **Conversar a partir do contato:** o botão da linha chama `POST /api/v1/conversations`
+  (acha ou cria: clicar de novo reaproveita a conversa) e leva pra caixa de entrada já com ela
+  selecionada. O handoff é um `Signal<Option<String>>` em contexto (`PendingConversation`), não
+  parâmetro de rota — a caixa de entrada lê na hora de montar e zera. Fica desabilitado sem
+  telefone, sem número cadastrado ou com contato bloqueado; com mais de um número aparece um
+  seletor de qual usar (o padrão é o primeiro).
+- **Janela de 24h:** conversa aberta por nós nasce fora da janela, então texto livre volta 422.
+  A caixa de entrada avisa isso (`service_window_open` do `InboxItem`) e, com a janela fechada,
+  troca o campo de texto pelo formulário de template.
+- **Enviar template:** nome (a-z, 0-9, `_`), idioma (padrão `pt_BR`) e as variáveis do corpo,
+  uma por linha, que viram `components: [{ type: "body", parameters: [{ type: "text" }] }]` na
+  ordem `{{1}}`, `{{2}}`. O nome é digitado à mão porque `wa_templates` ainda não é
+  sincronizada com a Meta; quem recusa nome inexistente é a Meta (o erro volta na mensagem). Com
+  a janela aberta o link "enviar template" abre o mesmo formulário. Na thread o template
+  aparece como `template: <nome>` (o texto renderizado não é guardado).
+- **A tela não atualiza sozinha:** nem a lista nem a thread fazem polling. Mensagem que chega
+  depois de aberta só aparece ao reabrir a conversa ou recarregar.
+- Sem número cadastrado o webhook descarta a mensagem: por isso essa tela vem antes de qualquer
+  teste real com o Kapso.
+- Provado com Playwright (14 verificações): erro de telefone sem DDI, E.164, Enter salva, busca,
+  `phone_number_id` inválido, número repetido (409) e recarregar a página mantendo a sessão.
+
+## Tamanhos de tela
+
+Medido por `getBoundingClientRect` (não a olho) em 2560×1440, 1920×1080, 1366×768, 1024×768,
+768×1024 e 390×844, com dados de volume (40 contatos, 24 leads, 12 conversas com mensagem
+longa e URL sem espaço). Nenhuma tela estoura a largura da janela em nenhum tamanho.
+
+- **Telas grandes:** lista de conversas cresce com a janela (`clamp(280px, 22vw, 420px)`), bolha
+  de mensagem para em 680px (linha de 150 caracteres não se lê), colunas do kanban esticam até
+  380px, e Contatos/WhatsApp ficam num miolo de 1400px centralizado.
+- **Bug achado:** texto sem espaço (URL) numa bolha alargava a thread além da janela e empurrava
+  a lista de conversas pra fora da tela abaixo de ~1100px. Corrigido com `min-width: 0` na
+  thread e `overflow-wrap: anywhere` na bolha. Nome comprido também passava por baixo do
+  contador de não lidas; agora corta com reticências.
+- **Até 800px** (tablet/celular): a caixa de entrada mostra a lista OU a conversa, com o botão
+  "← conversas"; tabelas rolam na horizontal dentro da própria caixa; o menu do topo rola de
+  lado. A partir de 801px é o layout de sempre.
+- Sem meta `viewport` no `index.html`? O `dx` já gera. Tela de celular real (toque, teclado
+  virtual) não foi testada, só janela de 390px no Chromium.
+
 ## Ainda não tem
 
 - Limite de tentativas no login (Rate Limiting binding do Workers)
@@ -241,4 +371,10 @@ Envio aceita `Idempotency-Key`: repetir a chave devolve a mesma mensagem com 200
   fora do ar mais que os ~50s de retry
 - Alerta quando algo cair na `crm-inbound-dlq`
 - Detecção de opt-out ("parar", "sair") marcando `is_blocked`
-- Interface em Dioxus
+- Interface: login, caixa de entrada, kanban/métricas, contatos e números de WhatsApp. Faltam
+  editar contato, editar/detalhe de lead (título, valor, descrição só pela API), ligar lead a
+  contato pela tela, catálogo de templates aprovados (hoje o nome é digitado à mão) e envio de
+  mídia
+- Kanban sem arraste (só os botões ◀/▶) e sem reordenar dentro da mesma coluna
+- Seletor de tenant na interface (hoje sempre abre no primeiro tenant do usuário)
+- Paginação na lista de conversas e no scroll da thread (hoje só a primeira página)
